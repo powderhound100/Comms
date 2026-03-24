@@ -1,0 +1,14 @@
+[
+  {"ebn0Db":0,"ber":0.082,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":1,"ber":0.059,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":2,"ber":0.041,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":3,"ber":0.025,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":4,"ber":0.014,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":5,"ber":0.007,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":6,"ber":0.003,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":7,"ber":0.001,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":8,"ber":0.00028,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":9,"ber":0.00006,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":10,"ber":0.000008,"modulation":"bpsk","coding":"none","channel":"ota"},
+  {"ebn0Db":11,"ber":0.0000006,"modulation":"bpsk","coding":"none","channel":"ota"}
+]

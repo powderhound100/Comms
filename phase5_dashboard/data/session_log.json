@@ -1,0 +1,12 @@
+[
+  {"sessionId":"001","datetimeUtc":"2026-04-01T12:00:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":73.8,"deltaDb":1.4,"decodedOk":true,"notes":"first_light"},
+  {"sessionId":"002","datetimeUtc":"2026-04-02T03:45:00","satellite":"METEOR-M2-3","freqMhz":137.9,"durationSec":600,"elevationDeg":42.1,"predictedCn0Dbhz":45.3,"measuredCn0Dbhz":43.9,"deltaDb":1.4,"decodedOk":true,"notes":"good_pass"},
+  {"sessionId":"003","datetimeUtc":"2026-04-03T12:15:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":74.5,"deltaDb":0.7,"decodedOk":true,"notes":"clear_sky"},
+  {"sessionId":"004","datetimeUtc":"2026-04-04T14:30:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":72.1,"deltaDb":3.1,"decodedOk":true,"notes":"light_rain"},
+  {"sessionId":"005","datetimeUtc":"2026-04-05T04:12:00","satellite":"NOAA-19","freqMhz":137.62,"durationSec":720,"elevationDeg":55.3,"predictedCn0Dbhz":48.1,"measuredCn0Dbhz":47.2,"deltaDb":0.9,"decodedOk":true,"notes":"high_pass"},
+  {"sessionId":"006","datetimeUtc":"2026-04-06T12:00:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":74.8,"deltaDb":0.4,"decodedOk":true,"notes":"optimal"},
+  {"sessionId":"007","datetimeUtc":"2026-04-07T05:20:00","satellite":"METEOR-M2-3","freqMhz":137.9,"durationSec":480,"elevationDeg":28.5,"predictedCn0Dbhz":42.8,"measuredCn0Dbhz":41.3,"deltaDb":1.5,"decodedOk":true,"notes":"low_pass"},
+  {"sessionId":"008","datetimeUtc":"2026-04-08T12:10:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":73.4,"deltaDb":1.8,"decodedOk":true,"notes":"partly_cloudy"},
+  {"sessionId":"009","datetimeUtc":"2026-04-09T03:55:00","satellite":"NOAA-19","freqMhz":137.62,"durationSec":540,"elevationDeg":38.7,"predictedCn0Dbhz":46.5,"measuredCn0Dbhz":45.1,"deltaDb":1.4,"decodedOk":true,"notes":"normal"},
+  {"sessionId":"010","datetimeUtc":"2026-04-10T12:05:00","satellite":"GOES-18","freqMhz":1694.1,"durationSec":120,"elevationDeg":30.2,"predictedCn0Dbhz":75.2,"measuredCn0Dbhz":74.1,"deltaDb":1.1,"decodedOk":true,"notes":"clear_sky"}
+]
