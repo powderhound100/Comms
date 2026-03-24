@@ -14,6 +14,7 @@ const navLinks = [
   { href: '/sessions', label: 'Sessions' },
   { href: '/passes', label: 'Passes' },
   { href: '/icd', label: 'ICD' },
+  { href: '/references', label: 'References' },
 ]
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
