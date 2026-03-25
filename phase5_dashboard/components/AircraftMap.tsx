@@ -20,7 +20,7 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
   // Compute map center from aircraft positions
   const center = useMemo(() => {
     const withPos = aircraft.filter(a => a.latitude != null && a.longitude != null)
-    if (withPos.length === 0) return [39.8283, -98.5795] as [number, number] // center of US
+    if (withPos.length === 0) return [47.6062, -122.3321] as [number, number] // Seattle
     const avgLat = withPos.reduce((s, a) => s + a.latitude!, 0) / withPos.length
     const avgLon = withPos.reduce((s, a) => s + a.longitude!, 0) / withPos.length
     return [avgLat, avgLon] as [number, number]

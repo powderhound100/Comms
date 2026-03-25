@@ -164,8 +164,13 @@ class SpectrumScanner:
                 self._current_freq = freq
                 self.sdr.set_center_freq(freq)
 
-                # Capture IQ samples
-                iq = self.sdr.read_samples(self.config.samples_per_step)
+                # Capture IQ samples — extended dwell for ADS-B (1090 MHz)
+                if self.protocol_decoder and self.protocol_decoder.identify_protocol(freq) == "adsb":
+                    # ADS-B needs several seconds of samples to decode multiple messages
+                    adsb_samples = self.config.samples_per_step * 20  # ~2s at 2.4 Msps
+                    iq = self.sdr.read_samples(adsb_samples)
+                else:
+                    iq = self.sdr.read_samples(self.config.samples_per_step)
 
                 # Compute PSD
                 freqs, psd_dbfs = self.detector.compute_psd(iq, sample_rate)

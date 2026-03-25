@@ -94,6 +94,9 @@ class POCSAGMessage:
 class ProtocolDecoder:
     """Decode protocol-level data from detected signals based on frequency and type."""
 
+    # CRC-24 generator polynomial for ADS-B
+    _CRC_POLY = 0xFFF409
+
     # Frequency → protocol mapping (center freq in Hz, tolerance in Hz)
     PROTOCOL_MAP = [
         (1_090_000_000, 2_000_000, "adsb"),
@@ -121,8 +124,24 @@ class ProtocolDecoder:
         # ADS-B state: track aircraft by ICAO
         self._aircraft: dict[str, AircraftPosition] = {}
 
+        # CPR even/odd cache for proper position decoding: icao → {0: (lat_cpr, lon_cpr, time), 1: ...}
+        self._cpr_cache: dict[str, dict[int, tuple[float, float, float]]] = {}
+
         # Pending satellite decode jobs
         self._sat_jobs: list[SatelliteDecodeJob] = []
+
+    @staticmethod
+    def _check_adsb_crc(msg: bytearray) -> bool:
+        """Verify CRC-24 of an ADS-B message (112 bits / 14 bytes)."""
+        n_bytes = len(msg)
+        n_bits = (n_bytes - 3) * 8
+        msg_int = int.from_bytes(msg, 'big')
+        # XOR-divide the first 88 bits by the generator
+        for i in range(n_bits - 1, -1, -1):
+            if msg_int & (1 << (i + 24)):
+                msg_int ^= ProtocolDecoder._CRC_POLY << i
+        # Remainder should be zero for valid messages
+        return (msg_int & 0xFFFFFF) == 0
 
     def identify_protocol(self, freq_hz: float) -> str | None:
         """Identify which protocol a frequency belongs to."""
@@ -237,25 +256,18 @@ class ProtocolDecoder:
                 i += 1
                 continue
 
-            # Convert bits to bytes
-            msg_bytes = bytearray()
-            for byte_idx in range(14):  # 112 bits = 14 bytes
-                byte_val = 0
-                for bit_idx in range(8):
-                    byte_val = (byte_val << 1) | bits[byte_idx * 1 + byte_idx + bit_idx]
-                    # Correct indexing
-                byte_val = 0
-                for bit_idx in range(8):
-                    byte_val = (byte_val << 1) | bits[byte_idx + byte_idx * 0 + byte_idx]
-                msg_bytes.append(byte_val)
-
-            # Simpler: pack bits directly
+            # Pack 112 bits into 14 bytes
             msg_bytes = bytearray()
             for byte_idx in range(14):
                 val = 0
                 for bit_idx in range(8):
                     val = (val << 1) | bits[byte_idx * 8 + bit_idx]
                 msg_bytes.append(val)
+
+            # CRC-24 check — ADS-B uses a 24-bit CRC (last 3 bytes)
+            if not self._check_adsb_crc(msg_bytes):
+                i += 1
+                continue
 
             msg_hex = msg_bytes.hex().upper()
 
@@ -326,7 +338,7 @@ class ProtocolDecoder:
         elif 9 <= tc <= 18:
             # Airborne position (barometric)
             aircraft.altitude_ft = self._decode_altitude(msg[4:11], tc)
-            lat, lon = self._decode_cpr_position(msg[4:11], tc)
+            lat, lon = self._decode_cpr_position(msg[4:11], tc, icao)
             if lat is not None:
                 aircraft.latitude = lat
                 aircraft.longitude = lon
@@ -388,25 +400,87 @@ class ProtocolDecoder:
             return n * 25 - 1000
         return None
 
-    def _decode_cpr_position(self, me: bytes, tc: int) -> tuple[float | None, float | None]:
-        """Decode CPR-encoded lat/lon (simplified — single message estimate)."""
-        # Full CPR decoding needs both even and odd messages.
-        # This gives a rough position from a single frame.
+    def _decode_cpr_position(self, me: bytes, tc: int, icao: str) -> tuple[float | None, float | None]:
+        """Decode CPR-encoded lat/lon using even/odd message pairs."""
+        # CPR flag: 0=even, 1=odd
+        cpr_flag = (me[2] >> 2) & 1
         lat_bits = ((me[2] & 0x03) << 15) | (me[3] << 7) | (me[4] >> 1)
         lon_bits = ((me[4] & 0x01) << 16) | (me[5] << 8) | me[6]
 
-        # Normalize to 0-1 range
         lat_cpr = lat_bits / 131072.0
         lon_cpr = lon_bits / 131072.0
+        now = time.time()
 
-        # Rough position estimate (good to ~5 nm without even/odd pair)
-        lat = lat_cpr * 90.0
-        lon = lon_cpr * 360.0
+        # Store in CPR cache
+        if icao not in self._cpr_cache:
+            self._cpr_cache[icao] = {}
+        self._cpr_cache[icao][cpr_flag] = (lat_cpr, lon_cpr, now)
+
+        # Need both even (0) and odd (1) frames within 10s
+        cache = self._cpr_cache[icao]
+        if 0 not in cache or 1 not in cache:
+            return None, None
+        if abs(cache[0][2] - cache[1][2]) > 10.0:
+            return None, None
+
+        lat0, lon0, t0 = cache[0]
+        lat1, lon1, t1 = cache[1]
+
+        # CPR global decode
+        NZ = 15
+        d_lat0 = 360.0 / (4 * NZ)
+        d_lat1 = 360.0 / (4 * NZ - 1)
+
+        j = int(np.floor(59 * lat0 - 60 * lat1 + 0.5))
+
+        lat_even = d_lat0 * ((j % 60) + lat0)
+        lat_odd = d_lat1 * ((j % 59) + lat1)
+
+        if lat_even >= 270:
+            lat_even -= 360
+        if lat_odd >= 270:
+            lat_odd -= 360
+
+        # Use the most recent message's latitude
+        if t0 >= t1:
+            lat = lat_even
+        else:
+            lat = lat_odd
+
+        # Compute NL (number of longitude zones)
+        def _nl(lat_val: float) -> int:
+            if abs(lat_val) >= 87.0:
+                return 1
+            return int(np.floor(
+                2.0 * np.pi / np.arccos(
+                    1.0 - (1.0 - np.cos(np.pi / (2.0 * NZ))) /
+                    np.cos(np.pi / 180.0 * lat_val) ** 2
+                )
+            ))
+
+        nl_even = _nl(lat_even)
+        nl_odd = _nl(lat_odd)
+        if nl_even != nl_odd:
+            return None, None  # Zone mismatch, wait for next pair
+
+        # Longitude
+        if t0 >= t1:
+            # Use even
+            nl = max(nl_even, 1)
+            m = int(np.floor(lon0 * (nl - 1) - lon1 * nl + 0.5))
+            d_lon = 360.0 / nl if nl > 0 else 360.0
+            lon = d_lon * ((m % nl) + lon0)
+        else:
+            # Use odd
+            nl = max(nl_odd - 1, 1)
+            m = int(np.floor(lon0 * (nl - 1) - lon1 * nl + 0.5))
+            d_lon = 360.0 / nl if nl > 0 else 360.0
+            lon = d_lon * ((m % nl) + lon1)
+
         if lon > 180:
             lon -= 360
 
-        # These are rough — real decoding needs message pairs
-        if 0 < abs(lat) < 90 and abs(lon) <= 180:
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
             return round(lat, 4), round(lon, 4)
         return None, None
 
