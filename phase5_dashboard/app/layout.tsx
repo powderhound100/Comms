@@ -14,6 +14,7 @@ const navLinks = [
   { href: '/sessions', label: 'Sessions' },
   { href: '/passes', label: 'Passes' },
   { href: '/icd', label: 'ICD' },
+  { href: '/gnu-radio', label: 'GNU Radio' },
   { href: '/references', label: 'References' },
 ]
 
