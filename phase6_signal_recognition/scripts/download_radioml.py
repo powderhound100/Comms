@@ -10,6 +10,7 @@ from pathlib import Path
 
 # Download URLs (try in order)
 URLS = [
+    "https://github.com/dannis999/RML2016.10a/releases/download/v1.0/RML2016.10a_dict.pkl",
     "https://opendata.deepsig.io/datasets/2016.10/RML2016.10a_dict.pkl.bz2",
 ]
 
@@ -77,27 +78,33 @@ def main():
         return
 
     # Download — try each URL
-    if not BZ2_PATH.exists():
-        for url in URLS:
-            try:
-                download_with_progress(url, BZ2_PATH)
-                break
-            except Exception as e:
-                print(f"  Failed: {e}")
-                if BZ2_PATH.exists():
-                    BZ2_PATH.unlink()
-                continue
-        else:
-            print("All download URLs failed.")
-            sys.exit(1)
-    else:
-        print(f"Compressed file exists: {BZ2_PATH}")
+    downloaded = False
+    for url in URLS:
+        is_bz2 = url.endswith(".bz2")
+        dest = BZ2_PATH if is_bz2 else PKL_PATH
+        if dest.exists():
+            print(f"Already have: {dest}")
+            downloaded = True
+            break
+        try:
+            download_with_progress(url, dest)
+            downloaded = True
+            break
+        except Exception as e:
+            print(f"  Failed: {e}")
+            if dest.exists():
+                dest.unlink()
+            continue
 
-    # Decompress
-    decompress_bz2(BZ2_PATH, PKL_PATH)
+    if not downloaded:
+        print("All download URLs failed.")
+        sys.exit(1)
 
-    # Clean up compressed file
-    BZ2_PATH.unlink()
+    # Decompress if we got a .bz2 file
+    if BZ2_PATH.exists() and not PKL_PATH.exists():
+        decompress_bz2(BZ2_PATH, PKL_PATH)
+        BZ2_PATH.unlink()
+
     print(f"\nDataset ready: {PKL_PATH}")
 
     # Quick validation
