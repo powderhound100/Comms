@@ -110,6 +110,26 @@ const colorMap: Record<string, { bg: string; text: string; border: string; ring:
   violet:  { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/30', ring: 'ring-violet-500/40', dot: 'bg-violet-400' },
 }
 
+// Binary frame header: 1 byte mode + 4 bytes sampleRate (LE uint32)
+const HEADER_SIZE = 5
+const MODE_NAMES = ['wfm', 'nfm', 'am'] as const
+
+function parseAudioFrame(buf: ArrayBuffer): { mode: string; sampleRate: number; samples: Float32Array } | null {
+  if (buf.byteLength < HEADER_SIZE + 2) return null
+  const view = new DataView(buf)
+  const modeId = view.getUint8(0)
+  const sampleRate = view.getUint32(1, true) // little-endian
+  const mode = MODE_NAMES[modeId] ?? 'wfm'
+
+  // Convert int16 PCM → float32 [-1, 1]
+  const int16 = new Int16Array(buf, HEADER_SIZE)
+  const float32 = new Float32Array(int16.length)
+  for (let i = 0; i < int16.length; i++) {
+    float32[i] = int16[i] / 32768
+  }
+  return { mode, sampleRate, samples: float32 }
+}
+
 // ──────────────────────────────────────────────────────────────
 // Spectrum analyser (canvas)
 // ──────────────────────────────────────────────────────────────
@@ -222,11 +242,19 @@ export default function RadioPage() {
   const [activePreset, setActivePreset] = useState<string | null>('KUOW')
   const [psdData, setPsdData] = useState<number[] | null>(null)
   const [signalStrength, setSignalStrength] = useState(-70)
+  const [bufferPct, setBufferPct] = useState(0)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
-  const esRef = useRef<EventSource | null>(null)
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const jitterCountRef = useRef(0)
+  const jitterBufferRef = useRef<Float32Array[]>([])
+  const playbackStartedRef = useRef(false)
+
+  // Jitter buffer: accumulate ~100ms (~5 chunks at 20ms) before starting
+  const JITTER_CHUNKS = 5
 
   useSpectrumCanvas(canvasRef, psdData, freq, 2.4e6)
 
@@ -236,6 +264,16 @@ export default function RadioPage() {
     setMode(newMode)
     setFreqInput((newFreq / 1e6).toFixed(3))
     setActivePreset(presetName ?? null)
+
+    // Send tune command over existing WebSocket if connected
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: newFreq, mode: newMode }))
+      // Reset jitter buffer for clean transition
+      jitterCountRef.current = 0
+      jitterBufferRef.current = []
+      playbackStartedRef.current = false
+      workletNodeRef.current?.port.postMessage({ type: 'clear' })
+    }
 
     try {
       await fetch('/api/radio', {
@@ -249,110 +287,105 @@ export default function RadioPage() {
   }, [])
 
   // Connect to audio stream
-  const togglePlay = useCallback(() => {
+  const togglePlay = useCallback(async () => {
     if (playing) {
       // Stop
-      esRef.current?.close()
-      esRef.current = null
+      wsRef.current?.close()
+      wsRef.current = null
+      workletNodeRef.current?.disconnect()
+      workletNodeRef.current = null
       audioCtxRef.current?.close()
       audioCtxRef.current = null
       gainNodeRef.current = null
+      jitterCountRef.current = 0
+      jitterBufferRef.current = []
+      playbackStartedRef.current = false
       setPlaying(false)
       setConnected(false)
+      setBufferPct(0)
       return
     }
 
-    // Start audio context (resume needed for browser autoplay policy)
+    // Start AudioContext + AudioWorklet
     const actx = new AudioContext({ sampleRate: 48000 })
-    actx.resume() // Explicit resume after user gesture
+    await actx.resume()
+
+    try {
+      await actx.audioWorklet.addModule('/audio-processor.js')
+    } catch (err) {
+      console.error('Failed to load AudioWorklet:', err)
+      actx.close()
+      return
+    }
+
+    const workletNode = new AudioWorkletNode(actx, 'radio-audio-processor')
     const gain = actx.createGain()
     gain.gain.value = volume
+    workletNode.connect(gain)
     gain.connect(actx.destination)
+
     audioCtxRef.current = actx
     gainNodeRef.current = gain
+    workletNodeRef.current = workletNode
     setPlaying(true)
 
-    // Gapless audio scheduling with pre-buffer
-    let nextPlayTime = 0
-    const preBuffer: Float32Array[] = []
-    let buffering = true
-    const PRE_BUFFER_CHUNKS = 2 // Buffer 2 chunks (~1s) before starting playback
-
-    function flushBuffer() {
-      for (const floats of preBuffer) {
-        scheduleAudio(floats)
+    // Listen for buffer level reports from worklet
+    workletNode.port.onmessage = (e) => {
+      if (e.data.type === 'bufferLevel') {
+        setBufferPct(Math.round((e.data.samples / e.data.capacity) * 100))
       }
-      preBuffer.length = 0
-      buffering = false
     }
 
-    function scheduleAudio(floats: Float32Array, sampleRate = 48000) {
-      const buffer = actx.createBuffer(1, floats.length, sampleRate)
-      buffer.getChannelData(0).set(floats)
-      const source = actx.createBufferSource()
-      source.buffer = buffer
-      source.connect(gain)
+    // Reset jitter state
+    jitterCountRef.current = 0
+    jitterBufferRef.current = []
+    playbackStartedRef.current = false
 
-      const now = actx.currentTime
-      // Keep ahead by scheduling into the future; reset if we fall behind
-      if (nextPlayTime < now + 0.05) nextPlayTime = now + 0.05
-      source.start(nextPlayTime)
-      nextPlayTime += buffer.duration
-    }
+    // Connect WebSocket with binary mode
+    const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
+    const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
+    wsRef.current = ws
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function handleMessage(data: any) {
-      if (data.type === 'audio' && data.samples) {
+    ws.onopen = () => setConnected(true)
+    ws.onclose = () => setConnected(false)
+    ws.onerror = () => { /* will trigger onclose */ }
+
+    ws.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        // Binary frame — audio data
+        const parsed = parseAudioFrame(event.data)
+        if (!parsed) return
+
         if (actx.state === 'suspended') actx.resume()
 
-        // Decode base64 PCM float32
-        const raw = atob(data.samples)
-        const bytes = new Uint8Array(raw.length)
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-        const floats = new Float32Array(bytes.buffer)
-
-        if (buffering) {
-          preBuffer.push(floats)
-          if (preBuffer.length >= PRE_BUFFER_CHUNKS) flushBuffer()
+        if (!playbackStartedRef.current) {
+          // Jitter buffering phase
+          jitterBufferRef.current.push(parsed.samples)
+          jitterCountRef.current++
+          if (jitterCountRef.current >= JITTER_CHUNKS) {
+            // Flush jitter buffer into worklet
+            for (const chunk of jitterBufferRef.current) {
+              workletNode.port.postMessage({ type: 'audio', samples: chunk })
+            }
+            jitterBufferRef.current = []
+            playbackStartedRef.current = true
+          }
         } else {
-          scheduleAudio(floats, data.sample_rate || 48000)
+          // Normal streaming — post directly to worklet
+          workletNode.port.postMessage({ type: 'audio', samples: parsed.samples })
         }
-      }
-
-      if (data.type === 'spectrum') {
-        setPsdData(data.psd_dbfs)
-        if (data.psd_dbfs?.length) {
-          setSignalStrength(Math.max(...data.psd_dbfs))
-        }
-      }
-
-      if (data.type === 'connected') {
-        setConnected(true)
-      }
-    }
-
-    // Connect via WebSocket (localhost) or SSE (remote)
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
-
-    if (isLocal) {
-      const ws = new WebSocket(wsUrl)
-      ws.onopen = () => setConnected(true)
-      ws.onclose = () => setConnected(false)
-      ws.onerror = () => { /* will trigger onclose */ }
-      ws.onmessage = (event) => {
-        try { handleMessage(JSON.parse(event.data)) } catch { /* skip */ }
-      }
-      // Store for cleanup
-      const origClose = esRef.current
-      esRef.current = { close: () => ws.close() } as EventSource
-    } else {
-      const es = new EventSource(`/api/radio/stream?freq=${freq}&mode=${mode}`)
-      esRef.current = es
-      es.onopen = () => setConnected(true)
-      es.onerror = () => setConnected(false)
-      es.onmessage = (event) => {
-        try { handleMessage(JSON.parse(event.data)) } catch { /* skip */ }
+      } else {
+        // Text frame — spectrum JSON
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'spectrum') {
+            setPsdData(data.psd_dbfs)
+            if (data.psd_dbfs?.length) {
+              setSignalStrength(Math.max(...data.psd_dbfs))
+            }
+          }
+        } catch { /* skip */ }
       }
     }
   }, [playing, freq, mode, volume])
@@ -426,6 +459,22 @@ export default function RadioPage() {
               <span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span>
             </div>
           </div>
+
+          {/* Buffer indicator */}
+          {playing && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] text-gray-600 mb-1">
+                <span>BUFFER</span>
+                <span>{bufferPct}%</span>
+              </div>
+              <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500 bg-sky-500/60"
+                  style={{ width: `${bufferPct}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Controls row */}

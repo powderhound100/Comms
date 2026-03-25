@@ -3,16 +3,21 @@
 Separate from the scanner: tunes to a single frequency, demodulates
 audio (WFM, NFM, AM), and streams PCM + spectrum to the browser.
 
+Audio is sent as binary WebSocket frames (int16 PCM, 20ms chunks).
+Spectrum is sent as JSON text frames (~2 Hz).
+
 Usage:
     python radio_server.py [--port 8770] [--freq 94.9] [--mode wfm]
 """
 
 import asyncio
-import base64
 import json
 import logging
+import struct
 import sys
 import os
+import threading
+from collections import deque
 from urllib.parse import urlparse, parse_qs
 
 import click
@@ -26,6 +31,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("radio")
 
+# ── Binary frame header ────────────────────────────────────────
+# 1 byte: mode (0=wfm, 1=nfm, 2=am)
+# 4 bytes: sample_rate (uint32 LE)
+# rest: int16 PCM samples (LE)
+
+MODE_IDS = {"wfm": 0, "nfm": 1, "am": 2}
+
+
+def pack_audio_frame(mode: str, sample_rate: int, audio_int16: np.ndarray) -> bytes:
+    """Pack audio into a binary frame: header + int16 PCM."""
+    header = struct.pack("<BI", MODE_IDS.get(mode, 0), sample_rate)
+    return header + audio_int16.tobytes()
+
 
 class RadioReceiver:
     """Single-frequency SDR receiver with audio demodulation."""
@@ -37,6 +55,8 @@ class RadioReceiver:
         self.sample_rate: int = 2_400_000
         self.running: bool = False
         self._clients: set = set()
+        # Demod state for de-emphasis filter continuity
+        self._deemph_state: float = 0.0
 
     def open_sdr(self):
         if sys.platform == "win32":
@@ -66,9 +86,16 @@ class RadioReceiver:
     def tune(self, freq_hz: int, mode: str = "wfm"):
         self.freq_hz = freq_hz
         self.mode = mode
+        self._deemph_state = 0.0
         if self.sdr:
             self.sdr.center_freq = freq_hz
         logger.info("Tuned: %.3f MHz [%s]", freq_hz / 1e6, mode.upper())
+
+    def audio_rate(self) -> int:
+        """Output audio sample rate for current mode."""
+        if self.mode == "wfm":
+            return 48000
+        return 16000
 
     def demod(self, iq: np.ndarray) -> tuple[np.ndarray, int]:
         """Demodulate IQ to audio. Returns (audio_samples, sample_rate)."""
@@ -90,9 +117,10 @@ class RadioReceiver:
         tau = 75e-6
         alpha = 1.0 - np.exp(-1.0 / (audio_rate * tau))
         out = np.zeros_like(audio)
-        out[0] = audio[0]
+        out[0] = self._deemph_state + alpha * (audio[0] - self._deemph_state)
         for i in range(1, len(audio)):
             out[i] = out[i - 1] + alpha * (audio[i] - out[i - 1])
+        self._deemph_state = float(out[-1]) if len(out) > 0 else 0.0
         if np.max(np.abs(out)) > 0:
             out = out / np.max(np.abs(out)) * 0.9
         return out.astype(np.float32), audio_rate
@@ -115,9 +143,10 @@ class RadioReceiver:
         tau = 50e-6
         alpha = 1.0 - np.exp(-1.0 / (audio_rate * tau))
         out = np.zeros_like(audio)
-        out[0] = audio[0]
+        out[0] = self._deemph_state + alpha * (audio[0] - self._deemph_state)
         for i in range(1, len(audio)):
             out[i] = out[i - 1] + alpha * (audio[i] - out[i - 1])
+        self._deemph_state = float(out[-1]) if len(out) > 0 else 0.0
         if np.max(np.abs(out)) > 0:
             out = out / np.max(np.abs(out)) * 0.9
         return out.astype(np.float32), audio_rate
@@ -149,8 +178,30 @@ class RadioReceiver:
         return psd_db.tolist()
 
 
+def capture_thread(receiver: RadioReceiver, iq_queue: deque, stop_event: threading.Event):
+    """Background thread: continuously read IQ from SDR into a queue.
+
+    Reads small blocks (~20ms worth of samples) to keep latency low.
+    """
+    # 20ms at 2.4 Msps = 48000 complex samples
+    chunk_samples = 48000
+    while not stop_event.is_set():
+        if not receiver.sdr:
+            stop_event.wait(0.5)
+            continue
+        try:
+            iq = receiver.sdr.read_samples(chunk_samples)
+            iq_queue.append(iq)
+            # Limit queue depth to ~1 second (50 chunks * 20ms)
+            while len(iq_queue) > 50:
+                iq_queue.popleft()
+        except Exception as e:
+            logger.warning("SDR read error: %s", e)
+            stop_event.wait(0.2)
+
+
 async def radio_handler(websocket, receiver: RadioReceiver):
-    """Handle a single WebSocket client — stream audio + spectrum."""
+    """Handle a single WebSocket client — stream binary audio + JSON spectrum."""
     import websockets
 
     # Parse tune params from URL
@@ -168,6 +219,16 @@ async def radio_handler(websocket, receiver: RadioReceiver):
 
     receiver._clients.add(websocket)
     logger.info("Client connected (%d total)", len(receiver._clients))
+
+    # Start capture thread for this connection
+    iq_queue: deque = deque()
+    stop_event = threading.Event()
+    cap_thread = threading.Thread(
+        target=capture_thread,
+        args=(receiver, iq_queue, stop_event),
+        daemon=True,
+    )
+    cap_thread.start()
 
     try:
         # Read loop — handle tune commands from client
@@ -188,40 +249,37 @@ async def radio_handler(websocket, receiver: RadioReceiver):
 
         cmd_task = asyncio.create_task(read_commands())
 
-        # Stream loop — capture, demod, send
-        frame_count = 0
+        # Stream loop — pull from queue, demod, send binary audio + JSON spectrum
+        spectrum_counter = 0
+        last_iq_for_spectrum = None
+
         while True:
-            if not receiver.sdr:
-                await asyncio.sleep(1)
+            if not iq_queue:
+                await asyncio.sleep(0.005)
                 continue
 
             try:
-                loop = asyncio.get_event_loop()
-
-                # Capture a large block for smooth audio (~500ms)
-                iq = await loop.run_in_executor(
-                    None, receiver.sdr.read_samples, 1048576  # ~437ms at 2.4 Msps
-                )
+                iq = iq_queue.popleft()
+                last_iq_for_spectrum = iq
 
                 # Demod to audio
                 audio, audio_rate = receiver.demod(iq)
 
-                # Encode audio as base64 float32
-                audio_b64 = base64.b64encode(audio.tobytes()).decode('ascii')
+                if len(audio) == 0:
+                    continue
 
-                # Send audio chunk
-                await websocket.send(json.dumps({
-                    "type": "audio",
-                    "samples": audio_b64,
-                    "sample_rate": audio_rate,
-                    "freq_hz": receiver.freq_hz,
-                    "mode": receiver.mode,
-                }))
+                # Convert float32 → int16 for binary transfer (half the bandwidth)
+                audio_int16 = np.clip(audio * 32767, -32768, 32767).astype(np.int16)
 
-                # Send spectrum every 3rd frame to save bandwidth
-                frame_count += 1
-                if frame_count % 3 == 0:
-                    psd = receiver.compute_psd(iq)
+                # Send binary frame: header + int16 PCM
+                frame = pack_audio_frame(receiver.mode, audio_rate, audio_int16)
+                await websocket.send(frame)
+
+                # Send spectrum as JSON text every ~500ms (~25 chunks at 20ms)
+                spectrum_counter += 1
+                if spectrum_counter >= 25 and last_iq_for_spectrum is not None:
+                    spectrum_counter = 0
+                    psd = receiver.compute_psd(last_iq_for_spectrum)
                     await websocket.send(json.dumps({
                         "type": "spectrum",
                         "psd_dbfs": psd[::4],
@@ -229,15 +287,20 @@ async def radio_handler(websocket, receiver: RadioReceiver):
                         "bandwidth_hz": receiver.sample_rate,
                     }))
 
+                # Pace at real-time (~20ms per chunk)
+                chunk_duration = len(audio) / audio_rate
+                await asyncio.sleep(chunk_duration * 0.8)  # Slightly fast to keep buffer fed
+
+            except websockets.exceptions.ConnectionClosed:
+                break
             except Exception as e:
                 logger.warning("Stream error: %s", e)
-                await asyncio.sleep(0.5)
-
-            await asyncio.sleep(0.005)  # Yield
+                await asyncio.sleep(0.1)
 
     except Exception:
         pass
     finally:
+        stop_event.set()
         receiver._clients.discard(websocket)
         logger.info("Client disconnected (%d remaining)", len(receiver._clients))
 
@@ -260,6 +323,7 @@ def main(port, freq, mode):
         logger.info("GROUNDLINK Radio")
         logger.info("Frequency: %.3f MHz [%s]", freq, mode.upper())
         logger.info("WebSocket: ws://0.0.0.0:%d", port)
+        logger.info("Audio: binary int16 PCM, 20ms chunks")
         logger.info("=" * 50)
 
         async with websockets.serve(
