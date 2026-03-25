@@ -13,6 +13,30 @@ export interface ScanDetection {
   known_signal: string | null
   demod_type: string | null
   demod_preview: string | null
+  protocol: string | null
+  decoded_summary: string | null
+  decoded_data: Record<string, unknown> | null
+}
+
+export interface TrackedAircraft {
+  icao_hex: string
+  callsign: string | null
+  latitude: number | null
+  longitude: number | null
+  altitude_ft: number | null
+  ground_speed_kt: number | null
+  heading_deg: number | null
+  vertical_rate_fpm: number | null
+  squawk: string | null
+  on_ground: boolean
+}
+
+export interface SatelliteJob {
+  satellite: string
+  pipeline: string
+  iq_file: string
+  output_dir: string
+  status: string
 }
 
 export interface ScanSession {
@@ -63,30 +87,36 @@ export const demoDetections: ScanDetection[] = [
   {
     id: 1,
     detected_at: '2026-03-24T14:32:01Z',
-    frequency_hz: 162475000,
-    bandwidth_hz: 25000,
-    snr_db: 28.4,
-    modulation: 'WBFM',
-    confidence: 0.94,
-    model_used: 'vtcnn2',
-    inference_ms: 3.2,
-    known_signal: 'NOAA Weather',
-    demod_type: 'audio',
-    demod_preview: 'FM audio: 48000 samples @ 48000 Hz',
+    frequency_hz: 1090000000,
+    bandwidth_hz: 2000000,
+    snr_db: 22.3,
+    modulation: null,
+    confidence: null,
+    model_used: null,
+    inference_ms: null,
+    known_signal: 'ADS-B',
+    demod_type: 'bits',
+    demod_preview: '8D4840D6202CC371C32CE0576098',
+    protocol: 'adsb',
+    decoded_summary: '3 ADS-B msgs | ICAO 4840D6 (UAL1532) @ 40.6892,-73.8591 FL350',
+    decoded_data: { messages_decoded: 3, aircraft_tracked: 1, positions: [{ icao: '4840D6', callsign: 'UAL1532', lat: 40.6892, lon: -73.8591, alt_ft: 35000, speed_kt: 452.3, heading: 245.1 }] },
   },
   {
     id: 2,
     detected_at: '2026-03-24T14:31:45Z',
-    frequency_hz: 98100000,
-    bandwidth_hz: 200000,
-    snr_db: 35.1,
-    modulation: 'WBFM',
-    confidence: 0.97,
+    frequency_hz: 137620000,
+    bandwidth_hz: 40000,
+    snr_db: 18.7,
+    modulation: 'AM-DSB',
+    confidence: 0.89,
     model_used: 'vtcnn2',
-    inference_ms: 2.8,
-    known_signal: 'FM Broadcast',
+    inference_ms: 3.1,
+    known_signal: 'NOAA APT',
     demod_type: 'audio',
-    demod_preview: 'FM audio: 96000 samples @ 48000 Hz',
+    demod_preview: 'FM audio: 48000 samples @ 48000 Hz',
+    protocol: 'satellite_apt',
+    decoded_summary: 'NOAA-19 APT captured: NOAA-19_APT_20260324_143145.raw (12.4 MB) → 3 images decoded',
+    decoded_data: { satellite: 'NOAA-19', capture_type: 'APT', file_size_mb: 12.4, decoded_files: ['channel_a.png', 'channel_b.png', 'composite.png'] },
   },
   {
     id: 3,
@@ -101,33 +131,49 @@ export const demoDetections: ScanDetection[] = [
     known_signal: '2m APRS',
     demod_type: 'bits',
     demod_preview: 'BPSK bits: a4f2c8e1... (128 bytes)',
+    protocol: 'aprs',
+    decoded_summary: 'APRS: W3ADO-1 @ 39.9526,-75.1635 — Philly APRS Digi',
+    decoded_data: { packets_decoded: 1, positions: [{ callsign: 'W3ADO-1', latitude: 39.9526, longitude: -75.1635, comment: 'Philly APRS Digi' }] },
   },
   {
     id: 4,
     detected_at: '2026-03-24T14:30:58Z',
-    frequency_hz: 121500000,
+    frequency_hz: 162475000,
     bandwidth_hz: 25000,
-    snr_db: 8.2,
-    modulation: 'AM-DSB',
-    confidence: 0.82,
+    snr_db: 28.4,
+    modulation: 'WBFM',
+    confidence: 0.94,
     model_used: 'vtcnn2',
-    inference_ms: 3.1,
-    known_signal: 'Aviation Voice',
+    inference_ms: 3.2,
+    known_signal: 'NOAA Weather',
     demod_type: 'audio',
-    demod_preview: 'AM audio: 24000 samples @ 48000 Hz',
+    demod_preview: 'FM audio: 48000 samples @ 48000 Hz',
+    protocol: null,
+    decoded_summary: null,
+    decoded_data: null,
   },
   {
     id: 5,
     detected_at: '2026-03-24T14:30:30Z',
-    frequency_hz: 433920000,
-    bandwidth_hz: 50000,
-    snr_db: 6.1,
-    modulation: 'GFSK',
-    confidence: 0.61,
+    frequency_hz: 98100000,
+    bandwidth_hz: 200000,
+    snr_db: 35.1,
+    modulation: 'WBFM',
+    confidence: 0.97,
     model_used: 'vtcnn2',
-    inference_ms: 4.0,
-    known_signal: 'ISM 433',
-    demod_type: null,
-    demod_preview: null,
+    inference_ms: 2.8,
+    known_signal: 'FM Broadcast',
+    demod_type: 'audio',
+    demod_preview: 'FM audio: 96000 samples @ 48000 Hz',
+    protocol: null,
+    decoded_summary: null,
+    decoded_data: null,
   },
+]
+
+// Demo aircraft table
+export const demoAircraft: TrackedAircraft[] = [
+  { icao_hex: '4840D6', callsign: 'UAL1532', latitude: 40.6892, longitude: -73.8591, altitude_ft: 35000, ground_speed_kt: 452.3, heading_deg: 245.1, vertical_rate_fpm: 0, squawk: null, on_ground: false },
+  { icao_hex: 'A12BC3', callsign: 'DAL872', latitude: 40.7128, longitude: -74.0060, altitude_ft: 28000, ground_speed_kt: 380.5, heading_deg: 180.0, vertical_rate_fpm: -1200, squawk: null, on_ground: false },
+  { icao_hex: '3C6745', callsign: 'DLH456', latitude: 40.6413, longitude: -73.7781, altitude_ft: 5200, ground_speed_kt: 165.0, heading_deg: 45.3, vertical_rate_fpm: -800, squawk: null, on_ground: false },
 ]

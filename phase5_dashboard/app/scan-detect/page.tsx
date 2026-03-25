@@ -6,8 +6,10 @@ import {
   scanPipelineChain,
   defaultScanBands,
   demoDetections,
+  demoAircraft,
   type ScanDetection,
   type ScannerStatus,
+  type TrackedAircraft,
 } from '@/data/scan-detect'
 
 // Color map: dark blue → cyan → yellow → red (matches WaterfallDisplay)
@@ -71,6 +73,32 @@ function modBadge(mod: string | null) {
   )
 }
 
+function protocolBadge(protocol: string | null) {
+  if (!protocol) return null
+  const colors: Record<string, string> = {
+    adsb: 'bg-sky-900/50 border-sky-700 text-sky-300',
+    aprs: 'bg-lime-900/50 border-lime-700 text-lime-300',
+    satellite_apt: 'bg-indigo-900/50 border-indigo-700 text-indigo-300',
+    satellite_lrpt: 'bg-indigo-900/50 border-indigo-700 text-indigo-300',
+    satellite_lrit: 'bg-indigo-900/50 border-indigo-700 text-indigo-300',
+    pocsag: 'bg-rose-900/50 border-rose-700 text-rose-300',
+  }
+  const labels: Record<string, string> = {
+    adsb: 'ADS-B',
+    aprs: 'APRS',
+    satellite_apt: 'SAT-APT',
+    satellite_lrpt: 'SAT-LRPT',
+    satellite_lrit: 'SAT-LRIT',
+    pocsag: 'POCSAG',
+  }
+  const style = colors[protocol] || 'bg-gray-800 border-gray-600 text-gray-400'
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${style}`}>
+      {labels[protocol] || protocol}
+    </span>
+  )
+}
+
 export default function ScanDetectPage() {
   const [status, setStatus] = useState<ScannerStatus>({
     running: false,
@@ -79,6 +107,7 @@ export default function ScanDetectPage() {
     total_detections: 0,
   })
   const [detections, setDetections] = useState<ScanDetection[]>(demoDetections)
+  const [aircraft, setAircraft] = useState<TrackedAircraft[]>(demoAircraft)
   const [wsConnected, setWsConnected] = useState(false)
   const [scanMode, setScanMode] = useState<'sweep' | 'watch' | 'band_list'>('band_list')
   const [startFreq, setStartFreq] = useState('87.5')
@@ -146,8 +175,17 @@ export default function ScanDetectPage() {
               known_signal: data.known_signal,
               demod_type: data.demod_type,
               demod_preview: data.demod_preview,
+              protocol: data.protocol || null,
+              decoded_summary: data.decoded_summary || null,
+              decoded_data: data.decoded_data || null,
             }
             setDetections(prev => [newDetection, ...prev].slice(0, 200))
+
+            // Update aircraft table from ADS-B detections
+            if (data.protocol === 'adsb' && data.decoded_data?.aircraft_table) {
+              const table = data.decoded_data.aircraft_table as Record<string, TrackedAircraft>
+              setAircraft(Object.values(table))
+            }
           }
 
           if (data.type === 'status') {
@@ -280,9 +318,16 @@ export default function ScanDetectPage() {
           <div className="text-sm text-gray-500">Unique types</div>
         </div>
         <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
-          <div className="text-sm text-gray-500">Avg Confidence</div>
-          <div className="text-2xl font-bold text-fuchsia-400">{(avgConfidence * 100).toFixed(1)}%</div>
-          <div className="text-sm text-gray-500">Classification accuracy</div>
+          <div className="text-sm text-gray-500">Aircraft Tracked</div>
+          <div className="text-2xl font-bold text-sky-400">{aircraft.length}</div>
+          <div className="text-sm text-gray-500">Via ADS-B decode</div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <div className="text-sm text-gray-500">Protocols Decoded</div>
+          <div className="text-2xl font-bold text-lime-400">
+            {new Set(detections.map(d => d.protocol).filter(Boolean)).size}
+          </div>
+          <div className="text-sm text-gray-500">ADS-B, APRS, SAT, POCSAG</div>
         </div>
       </div>
 
@@ -410,7 +455,8 @@ export default function ScanDetectPage() {
               <th className="py-2 pr-4">Modulation</th>
               <th className="py-2 pr-4 w-32">Confidence</th>
               <th className="py-2 pr-4">Known Signal</th>
-              <th className="py-2">Demod</th>
+              <th className="py-2 pr-4">Protocol</th>
+              <th className="py-2">Decoded</th>
             </tr>
           </thead>
           <tbody>
@@ -433,8 +479,15 @@ export default function ScanDetectPage() {
                 <td className="py-1.5 pr-4 text-gray-300 text-xs">
                   {det.known_signal || <span className="text-gray-600">—</span>}
                 </td>
+                <td className="py-1.5 pr-4">
+                  {protocolBadge(det.protocol)}
+                </td>
                 <td className="py-1.5">
-                  {det.demod_type ? (
+                  {det.decoded_summary ? (
+                    <span className="text-xs text-gray-300 truncate block max-w-[200px]" title={det.decoded_summary}>
+                      {det.decoded_summary}
+                    </span>
+                  ) : det.demod_type ? (
                     <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
                       det.demod_type === 'audio'
                         ? 'bg-emerald-900/50 border-emerald-700 text-emerald-300'
@@ -482,7 +535,18 @@ export default function ScanDetectPage() {
                   <span className="text-emerald-400 text-xs">{det.known_signal}</span>
                 </div>
               )}
-              {det.demod_preview && (
+              {det.protocol && (
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Protocol</span>
+                  {protocolBadge(det.protocol)}
+                </div>
+              )}
+              {det.decoded_summary && (
+                <div className="mt-2 p-2 bg-gray-800/50 rounded text-xs text-gray-300">
+                  {det.decoded_summary}
+                </div>
+              )}
+              {!det.decoded_summary && det.demod_preview && (
                 <div className="mt-2 p-2 bg-gray-800/50 rounded text-xs font-mono text-gray-400 truncate">
                   {det.demod_preview}
                 </div>
@@ -494,6 +558,55 @@ export default function ScanDetectPage() {
           </div>
         ))}
       </div>
+
+      {/* Aircraft Tracking Table */}
+      {aircraft.length > 0 && (
+        <>
+          <h2 className="text-xl font-semibold mb-4">Aircraft Tracking (ADS-B)</h2>
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-700 text-left text-gray-400">
+                  <th className="py-2 pr-4">ICAO</th>
+                  <th className="py-2 pr-4">Callsign</th>
+                  <th className="py-2 pr-4">Latitude</th>
+                  <th className="py-2 pr-4">Longitude</th>
+                  <th className="py-2 pr-4">Altitude</th>
+                  <th className="py-2 pr-4">Speed</th>
+                  <th className="py-2 pr-4">Heading</th>
+                  <th className="py-2">V/S</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aircraft.map((ac) => (
+                  <tr key={ac.icao_hex} className="border-b border-gray-800/50">
+                    <td className="py-1.5 pr-4 font-mono text-sky-400">{ac.icao_hex}</td>
+                    <td className="py-1.5 pr-4 font-medium">{ac.callsign || '—'}</td>
+                    <td className="py-1.5 pr-4 font-mono text-gray-300">{ac.latitude?.toFixed(4) ?? '—'}</td>
+                    <td className="py-1.5 pr-4 font-mono text-gray-300">{ac.longitude?.toFixed(4) ?? '—'}</td>
+                    <td className="py-1.5 pr-4 font-mono text-gray-300">
+                      {ac.altitude_ft != null ? `FL${Math.round(ac.altitude_ft / 100)}` : '—'}
+                    </td>
+                    <td className="py-1.5 pr-4 font-mono text-gray-400">
+                      {ac.ground_speed_kt != null ? `${ac.ground_speed_kt.toFixed(0)} kt` : '—'}
+                    </td>
+                    <td className="py-1.5 pr-4 font-mono text-gray-400">
+                      {ac.heading_deg != null ? `${ac.heading_deg.toFixed(0)}°` : '—'}
+                    </td>
+                    <td className="py-1.5 font-mono text-gray-400">
+                      {ac.vertical_rate_fpm != null ? (
+                        <span className={ac.vertical_rate_fpm > 0 ? 'text-emerald-400' : ac.vertical_rate_fpm < 0 ? 'text-amber-400' : ''}>
+                          {ac.vertical_rate_fpm > 0 ? '+' : ''}{ac.vertical_rate_fpm} fpm
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {/* Scan Bands */}
       <h2 className="text-xl font-semibold mb-4">Configured Scan Bands</h2>

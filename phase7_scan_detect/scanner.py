@@ -16,6 +16,7 @@ from src.sdr_backend import SDRDevice, SDRConfig
 from src.energy_detector import EnergyDetector, DetectorConfig
 from src.classifier import SignalClassifier
 from src.demodulator import Demodulator
+from src.protocol_decoder import ProtocolDecoder
 from src.logger import ScanLogger
 from src.websocket_server import ScanWebSocketServer
 from src.spectrum_scanner import SpectrumScanner, ScanConfig
@@ -77,6 +78,14 @@ def build_components(cfg: dict, mock: bool = False):
             max_duration_sec=dem_cfg.get("max_duration_sec", 10.0),
         )
 
+    # Protocol decoder (extracts usable data: aircraft positions, images, etc.)
+    proto_cfg = cfg.get("protocol_decode", {})
+    protocol_decoder = ProtocolDecoder(
+        iq_output_dir=proto_cfg.get("iq_output_dir", "output/iq_captures"),
+        satdump_output_dir=proto_cfg.get("satdump_output_dir", "output/satellite"),
+        enable_satdump=proto_cfg.get("enable_satdump", True),
+    )
+
     # Logger
     scan_logger = ScanLogger(db_path=log_cfg.get("db_path", "db/scanner.db"))
 
@@ -111,6 +120,7 @@ def build_components(cfg: dict, mock: bool = False):
         detector=detector,
         classifier=classifier,
         demodulator=demodulator,
+        protocol_decoder=protocol_decoder,
         scan_logger=scan_logger,
         ws_server=ws_server,
     )
@@ -162,12 +172,33 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
         sessions = scan_logger.get_scan_sessions()
         return web.json_response({"scans": sessions})
 
+    async def handle_aircraft(request):
+        """Return current tracked aircraft from ADS-B protocol decoder."""
+        if scanner.protocol_decoder:
+            from dataclasses import asdict
+            aircraft = {
+                icao: asdict(ac)
+                for icao, ac in scanner.protocol_decoder.tracked_aircraft.items()
+            }
+            return web.json_response({"aircraft": aircraft, "count": len(aircraft)})
+        return web.json_response({"aircraft": {}, "count": 0})
+
+    async def handle_satellite_jobs(request):
+        """Return satellite decode job status."""
+        if scanner.protocol_decoder:
+            from dataclasses import asdict
+            jobs = [asdict(j) for j in scanner.protocol_decoder.satellite_jobs]
+            return web.json_response({"jobs": jobs, "count": len(jobs)})
+        return web.json_response({"jobs": [], "count": 0})
+
     app = web.Application()
     app.router.add_get("/api/status", handle_status)
     app.router.add_post("/api/start", handle_start)
     app.router.add_post("/api/stop", handle_stop)
     app.router.add_get("/api/detections", handle_detections)
     app.router.add_get("/api/scans", handle_scans)
+    app.router.add_get("/api/aircraft", handle_aircraft)
+    app.router.add_get("/api/satellite-jobs", handle_satellite_jobs)
 
     runner = web.AppRunner(app)
     await runner.setup()

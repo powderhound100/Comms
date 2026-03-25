@@ -28,6 +28,9 @@ class DetectionRecord:
     known_signal: str | None = None
     demod_type: str | None = None
     demod_preview: str | None = None
+    protocol: str | None = None
+    decoded_summary: str | None = None
+    decoded_data_json: str | None = None
     id: int | None = None
 
 
@@ -70,6 +73,9 @@ class ScanLogger:
                 known_signal    TEXT,
                 demod_type      TEXT,
                 demod_preview   TEXT,
+                protocol        TEXT,
+                decoded_summary TEXT,
+                decoded_data_json TEXT,
                 FOREIGN KEY (scan_id) REFERENCES scans(scan_id)
             );
 
@@ -112,14 +118,16 @@ class ScanLogger:
             """INSERT INTO detections
                (scan_id, detected_at, frequency_hz, bandwidth_hz, snr_db,
                 noise_floor_dbfs, peak_power_dbfs, modulation, confidence,
-                model_used, inference_ms, known_signal, demod_type, demod_preview)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                model_used, inference_ms, known_signal, demod_type, demod_preview,
+                protocol, decoded_summary, decoded_data_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.scan_id, record.detected_at, record.frequency_hz,
                 record.bandwidth_hz, record.snr_db, record.noise_floor_dbfs,
                 record.peak_power_dbfs, record.modulation, record.confidence,
                 record.model_used, record.inference_ms, record.known_signal,
                 record.demod_type, record.demod_preview,
+                record.protocol, record.decoded_summary, record.decoded_data_json,
             ),
         )
         self.conn.commit()

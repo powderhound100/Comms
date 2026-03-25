@@ -11,6 +11,7 @@ from .sdr_backend import SDRDevice, SDRConfig
 from .energy_detector import EnergyDetector, DetectorConfig
 from .classifier import SignalClassifier
 from .demodulator import Demodulator
+from .protocol_decoder import ProtocolDecoder
 from .logger import ScanLogger, DetectionRecord
 from .websocket_server import ScanWebSocketServer
 from .known_signals import match_signal
@@ -60,6 +61,7 @@ class SpectrumScanner:
         detector: EnergyDetector,
         classifier: SignalClassifier | None,
         demodulator: Demodulator | None,
+        protocol_decoder: ProtocolDecoder | None,
         scan_logger: ScanLogger,
         ws_server: ScanWebSocketServer,
     ):
@@ -68,6 +70,7 @@ class SpectrumScanner:
         self.detector = detector
         self.classifier = classifier
         self.demodulator = demodulator
+        self.protocol_decoder = protocol_decoder
         self.scan_logger = scan_logger
         self.ws_server = ws_server
 
@@ -198,6 +201,16 @@ class SpectrumScanner:
                     # Match known signal
                     known = match_signal(det.center_freq_hz, mod_type)
 
+                    # Protocol decode — extract usable data (positions, images, etc.)
+                    decoded = None
+                    import json as _json
+                    if self.protocol_decoder:
+                        offset = det.center_freq_hz - freq
+                        decoded = self.protocol_decoder.decode(
+                            iq, det.center_freq_hz, det.bandwidth_hz,
+                            sample_rate, mod_type, det.snr_db,
+                        )
+
                     # Build detection record
                     record = DetectionRecord(
                         scan_id=self._scan_id,
@@ -214,6 +227,9 @@ class SpectrumScanner:
                         known_signal=known.name if known else None,
                         demod_type=demod_result.demod_type if demod_result else None,
                         demod_preview=demod_result.preview if demod_result else None,
+                        protocol=decoded.protocol if decoded else None,
+                        decoded_summary=decoded.summary if decoded else None,
+                        decoded_data_json=_json.dumps(decoded.fields) if decoded else None,
                     )
 
                     # Log to database
@@ -231,15 +247,19 @@ class SpectrumScanner:
                         "known_signal": known.name if known else None,
                         "demod_type": demod_result.demod_type if demod_result else None,
                         "demod_preview": demod_result.preview if demod_result else None,
+                        "protocol": decoded.protocol if decoded else None,
+                        "decoded_summary": decoded.summary if decoded else None,
+                        "decoded_data": decoded.fields if decoded else None,
                     })
 
                     logger.info(
-                        "Detection: %.3f MHz | %s (%.1f%%) | SNR %.1f dB | %s",
+                        "Detection: %.3f MHz | %s (%.1f%%) | SNR %.1f dB | %s%s",
                         det.center_freq_hz / 1e6,
                         mod_type or "unknown",
                         (classification.confidence * 100) if classification else 0,
                         det.snr_db,
                         known.name if known else "unidentified",
+                        f" | {decoded.summary}" if decoded else "",
                     )
 
                 # Dwell time
