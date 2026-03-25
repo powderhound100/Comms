@@ -1,4 +1,6 @@
-import BERCurvePlot from '@/components/BERCurvePlot'
+import dynamic from 'next/dynamic'
+
+const BERCurvePlot = dynamic(() => import('@/components/BERCurvePlot'), { ssr: false })
 
 export default function ModemPage() {
   return (
