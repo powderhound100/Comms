@@ -31,10 +31,17 @@ class SDRDevice:
             return
 
         try:
+            import os, sys
+            # Add RTL-SDR Blog driver DLL path on Windows
+            if sys.platform == "win32":
+                dll_dir = r"D:\tools\rtl-sdr\x64"
+                if os.path.isdir(dll_dir):
+                    os.add_dll_directory(dll_dir)
             from rtlsdr import RtlSdr
             self._device = RtlSdr(self.config.device_index)
             self._device.sample_rate = self.config.sample_rate
-            self._device.freq_correction = self.config.freq_correction_ppm
+            if self.config.freq_correction_ppm != 0:
+                self._device.freq_correction = self.config.freq_correction_ppm
             if self.config.gain == "auto":
                 self._device.gain = "auto"
             else:
