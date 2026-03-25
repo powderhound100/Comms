@@ -198,9 +198,9 @@ async def radio_handler(websocket, receiver: RadioReceiver):
             try:
                 loop = asyncio.get_event_loop()
 
-                # Capture a larger block for smoother audio (~250ms)
+                # Capture a large block for smooth audio (~500ms)
                 iq = await loop.run_in_executor(
-                    None, receiver.sdr.read_samples, 524288  # ~218ms at 2.4 Msps
+                    None, receiver.sdr.read_samples, 1048576  # ~437ms at 2.4 Msps
                 )
 
                 # Demod to audio

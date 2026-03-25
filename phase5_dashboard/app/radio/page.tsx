@@ -272,8 +272,33 @@ export default function RadioPage() {
     gainNodeRef.current = gain
     setPlaying(true)
 
-    // Track next playback time for gapless scheduling
+    // Gapless audio scheduling with pre-buffer
     let nextPlayTime = 0
+    const preBuffer: Float32Array[] = []
+    let buffering = true
+    const PRE_BUFFER_CHUNKS = 2 // Buffer 2 chunks (~1s) before starting playback
+
+    function flushBuffer() {
+      for (const floats of preBuffer) {
+        scheduleAudio(floats)
+      }
+      preBuffer.length = 0
+      buffering = false
+    }
+
+    function scheduleAudio(floats: Float32Array, sampleRate = 48000) {
+      const buffer = actx.createBuffer(1, floats.length, sampleRate)
+      buffer.getChannelData(0).set(floats)
+      const source = actx.createBufferSource()
+      source.buffer = buffer
+      source.connect(gain)
+
+      const now = actx.currentTime
+      // Keep ahead by scheduling into the future; reset if we fall behind
+      if (nextPlayTime < now + 0.05) nextPlayTime = now + 0.05
+      source.start(nextPlayTime)
+      nextPlayTime += buffer.duration
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function handleMessage(data: any) {
@@ -286,18 +311,12 @@ export default function RadioPage() {
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
         const floats = new Float32Array(bytes.buffer)
 
-        const sampleRate = data.sample_rate || 48000
-        const buffer = actx.createBuffer(1, floats.length, sampleRate)
-        buffer.getChannelData(0).set(floats)
-        const source = actx.createBufferSource()
-        source.buffer = buffer
-        source.connect(gain)
-
-        // Schedule gapless playback
-        const now = actx.currentTime
-        if (nextPlayTime < now) nextPlayTime = now
-        source.start(nextPlayTime)
-        nextPlayTime += buffer.duration
+        if (buffering) {
+          preBuffer.push(floats)
+          if (preBuffer.length >= PRE_BUFFER_CHUNKS) flushBuffer()
+        } else {
+          scheduleAudio(floats, data.sample_rate || 48000)
+        }
       }
 
       if (data.type === 'spectrum') {
