@@ -147,6 +147,33 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
     async def handle_start(request):
         if scanner.is_running:
             return web.json_response({"error": "Already running"}, status=400)
+
+        # Apply runtime config from request body
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        if body.get("mode"):
+            scanner.config.mode = body["mode"]
+        if body.get("start_freq_mhz"):
+            scanner.config.start_freq_hz = int(float(body["start_freq_mhz"]) * 1e6)
+        if body.get("stop_freq_mhz"):
+            scanner.config.stop_freq_hz = int(float(body["stop_freq_mhz"]) * 1e6)
+        if body.get("watch_freq_mhz"):
+            scanner.config.watch_freq_hz = int(float(body["watch_freq_mhz"]) * 1e6)
+            if scanner.config.mode == "watch":
+                logging.info("Watch mode: %.3f MHz", float(body["watch_freq_mhz"]))
+        if body.get("dwell_time_ms"):
+            scanner.config.dwell_time_ms = int(body["dwell_time_ms"])
+        if body.get("bands"):
+            scanner.config.bands = [
+                {"start_mhz": b["start_mhz"], "stop_mhz": b["stop_mhz"], "name": b.get("name")}
+                for b in body["bands"]
+            ]
+            scanner.config.mode = "band_list"
+            logging.info("Band list: %s", ", ".join(b.get("name", "?") for b in body["bands"]))
+
         asyncio.create_task(scanner.start())
         return web.json_response({"status": "starting", "scan_id": scanner.scan_id})
 

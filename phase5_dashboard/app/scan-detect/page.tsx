@@ -134,9 +134,12 @@ export default function ScanDetectPage() {
   })
   const [wsConnected, setWsConnected] = useState(false)
   const [scanMode, setScanMode] = useState<'sweep' | 'watch' | 'band_list'>('band_list')
-  const [startFreq, setStartFreq] = useState('87.5')
-  const [stopFreq, setStopFreq] = useState('108')
+  const [startFreq, setStartFreq] = useState('24')
+  const [stopFreq, setStopFreq] = useState('1766')
   const [watchFreq, setWatchFreq] = useState('162.475')
+  const [dwellTime, setDwellTime] = useState('100')
+  const [selectedBands, setSelectedBands] = useState<Set<string>>(() => new Set(defaultScanBands.map(b => b.name)))
+  const [lockedBand, setLockedBand] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const waterfallBuffer = useRef<number[][]>([])
@@ -322,22 +325,60 @@ export default function ScanDetectPage() {
   const handleStartStop = async () => {
     try {
       const action = status.running ? 'stop' : 'start'
+      const activeBands = defaultScanBands.filter(b => selectedBands.has(b.name))
       await fetch('/api/scanner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action,
           config: action === 'start' ? {
-            mode: scanMode,
+            mode: lockedBand ? 'watch' : scanMode,
             start_freq_mhz: parseFloat(startFreq),
             stop_freq_mhz: parseFloat(stopFreq),
-            watch_freq_mhz: parseFloat(watchFreq),
+            watch_freq_mhz: lockedBand
+              ? (activeBands.find(b => b.name === lockedBand)?.startMhz ?? parseFloat(watchFreq))
+                + ((activeBands.find(b => b.name === lockedBand)?.stopMhz ?? 0) - (activeBands.find(b => b.name === lockedBand)?.startMhz ?? 0)) / 2
+              : parseFloat(watchFreq),
+            dwell_time_ms: parseInt(dwellTime),
+            bands: activeBands.map(b => ({
+              name: b.name,
+              start_mhz: b.startMhz,
+              stop_mhz: b.stopMhz,
+            })),
           } : undefined,
         }),
       })
     } catch {
       // Handle error
     }
+  }
+
+  const handleLockBand = (bandName: string) => {
+    if (lockedBand === bandName) {
+      setLockedBand(null)
+      setScanMode('band_list')
+    } else {
+      setLockedBand(bandName)
+      setScanMode('watch')
+      const band = defaultScanBands.find(b => b.name === bandName)
+      if (band) {
+        const center = ((band.startMhz + band.stopMhz) / 2).toFixed(3)
+        setWatchFreq(center)
+      }
+    }
+  }
+
+  const toggleBand = (bandName: string) => {
+    setSelectedBands(prev => {
+      const next = new Set(prev)
+      if (next.has(bandName)) {
+        next.delete(bandName)
+        if (lockedBand === bandName) setLockedBand(null)
+      } else {
+        next.add(bandName)
+      }
+      return next
+    })
   }
 
   const avgConfidence = detections.filter(d => d.confidence !== null).reduce((sum, d) => sum + (d.confidence || 0), 0)
@@ -393,55 +434,53 @@ export default function ScanDetectPage() {
 
       {/* Scan Control Panel */}
       <h2 className="text-xl font-semibold mb-4">Scan Control</h2>
-      <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8">
-        <div className="flex flex-wrap gap-4 items-end">
+      <div className="bg-gray-900 rounded-lg border border-gray-800 mb-8">
+        {/* Top row: mode, params, start/stop */}
+        <div className="flex flex-wrap gap-4 items-end p-4 border-b border-gray-800">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Mode</label>
             <select
-              value={scanMode}
-              onChange={(e) => setScanMode(e.target.value as 'sweep' | 'watch' | 'band_list')}
+              value={lockedBand ? 'watch' : scanMode}
+              onChange={(e) => { setScanMode(e.target.value as 'sweep' | 'watch' | 'band_list'); setLockedBand(null) }}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm"
             >
               <option value="sweep">Sweep</option>
-              <option value="watch">Watch</option>
-              <option value="band_list">Band List</option>
+              <option value="watch">Watch Frequency</option>
+              <option value="band_list">Band Select</option>
             </select>
           </div>
 
-          {scanMode === 'sweep' && (
+          {scanMode === 'sweep' && !lockedBand && (
             <>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Start (MHz)</label>
-                <input
-                  type="number"
-                  value={startFreq}
-                  onChange={(e) => setStartFreq(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-28"
-                />
+                <input type="number" value={startFreq} onChange={(e) => setStartFreq(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-28" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Stop (MHz)</label>
-                <input
-                  type="number"
-                  value={stopFreq}
-                  onChange={(e) => setStopFreq(e.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-28"
-                />
+                <input type="number" value={stopFreq} onChange={(e) => setStopFreq(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-28" />
               </div>
             </>
           )}
 
-          {scanMode === 'watch' && (
+          {(scanMode === 'watch' || lockedBand) && (
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Frequency (MHz)</label>
-              <input
-                type="number"
-                value={watchFreq}
-                onChange={(e) => setWatchFreq(e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-32"
-              />
+              <label className="block text-xs text-gray-500 mb-1">
+                {lockedBand ? `Locked: ${lockedBand}` : 'Frequency (MHz)'}
+              </label>
+              <input type="number" value={watchFreq} onChange={(e) => setWatchFreq(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-32" />
             </div>
           )}
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Dwell (ms)</label>
+            <input type="number" value={dwellTime} onChange={(e) => setDwellTime(e.target.value)}
+              min="50" max="10000" step="50"
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm font-mono w-24" />
+          </div>
 
           <button
             onClick={handleStartStop}
@@ -457,8 +496,64 @@ export default function ScanDetectPage() {
           <div className="ml-auto flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400' : 'bg-gray-600'}`} />
             <span className="text-xs text-gray-500">
-              {wsConnected ? 'WebSocket connected' : 'WebSocket disconnected'}
+              {wsConnected ? 'Live' : 'Disconnected'}
             </span>
+          </div>
+        </div>
+
+        {/* Band selector grid */}
+        <div className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs text-gray-500 uppercase tracking-wider">
+              {scanMode === 'band_list' ? 'Select bands to sweep' : 'Quick lock — click to watch a band'}
+            </span>
+            {scanMode === 'band_list' && (
+              <div className="flex gap-2">
+                <button onClick={() => setSelectedBands(new Set(defaultScanBands.map(b => b.name)))}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 px-2 py-0.5 border border-gray-700 rounded">All</button>
+                <button onClick={() => setSelectedBands(new Set())}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 px-2 py-0.5 border border-gray-700 rounded">None</button>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {defaultScanBands.map(band => {
+              const isSelected = selectedBands.has(band.name)
+              const isLocked = lockedBand === band.name
+              return (
+                <div
+                  key={band.name}
+                  className={`relative rounded-lg border p-3 cursor-pointer transition-all ${
+                    isLocked
+                      ? 'border-fuchsia-500 bg-fuchsia-500/10 ring-1 ring-fuchsia-500/30'
+                      : isSelected
+                        ? 'border-gray-600 bg-gray-800/50 hover:border-gray-500'
+                        : 'border-gray-800 bg-gray-900/50 opacity-40 hover:opacity-70'
+                  }`}
+                  onClick={() => scanMode === 'band_list' ? toggleBand(band.name) : handleLockBand(band.name)}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-xs font-semibold ${isLocked ? 'text-fuchsia-400' : isSelected ? 'text-gray-200' : 'text-gray-500'}`}>
+                      {band.name}
+                    </span>
+                    {isLocked && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30">
+                        LOCKED
+                      </span>
+                    )}
+                    {!isLocked && scanMode === 'band_list' && (
+                      <div className={`w-3 h-3 rounded border ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-gray-600'}`}>
+                        {isSelected && <svg viewBox="0 0 12 12" className="w-3 h-3 text-white"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" fill="none"/></svg>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-[10px] font-mono text-gray-500">
+                    {band.startMhz}–{band.stopMhz} MHz
+                  </div>
+                  <div className="text-[10px] text-gray-600 mt-0.5">{band.description}</div>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
