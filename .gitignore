@@ -38,7 +38,22 @@ Thumbs.db
 *.swp
 *.swo
 
+# Cloudflare tunnel credentials
+cloudflared/credentials.json
+
 # Test / coverage
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Phase 6 — Signal Recognition (large files)
+phase6_signal_recognition/data/
+phase6_signal_recognition/models/
+phase6_signal_recognition/results/
+*.pkl
+*.pkl.bz2
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth

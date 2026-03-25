@@ -29,8 +29,8 @@ export default function SignalRecognitionPage() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <h1 className="text-2xl font-bold">Signal Recognition</h1>
-          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-900/50 border-amber-700 text-amber-300">
-            Planned
+          <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-900/50 border-emerald-700 text-emerald-300">
+            Active
           </span>
         </div>
         <p className="text-gray-400">
@@ -171,7 +171,11 @@ export default function SignalRecognitionPage() {
               <div className="text-sm text-gray-500">{stage.description}</div>
             </div>
             <code className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-400">{stage.tool}</code>
-            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-900/50 border-amber-700 text-amber-300">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+              stage.status === 'complete' ? 'bg-emerald-900/50 border-emerald-700 text-emerald-300' :
+              stage.status === 'active' ? 'bg-blue-900/50 border-blue-700 text-blue-300' :
+              'bg-amber-900/50 border-amber-700 text-amber-300'
+            }`}>
               {stage.status}
             </span>
           </div>

@@ -112,10 +112,10 @@ export const datasets: Dataset[] = [
 // ── Pipeline Stages ──
 
 export const pipelineStages: PipelineStage[] = [
-  { step: 1, name: 'IQ Capture', tool: 'RTL-SDR + GNU Radio', status: 'planned', description: 'Record raw IQ samples from RTL-SDR at target frequency' },
-  { step: 2, name: 'Preprocessing', tool: 'NumPy / SciPy', status: 'planned', description: 'Normalize, segment, and filter IQ data into fixed-length windows' },
-  { step: 3, name: 'Feature Extraction', tool: 'NumPy / Matplotlib', status: 'planned', description: 'Generate spectrograms, constellation diagrams, or raw IQ tensors' },
-  { step: 4, name: 'CNN Classifier', tool: 'TensorFlow / PyTorch', status: 'planned', description: 'Train and evaluate CNN model on RadioML dataset' },
+  { step: 1, name: 'IQ Capture', tool: 'RTL-SDR + GNU Radio', status: 'complete', description: 'Record raw IQ samples from RTL-SDR at target frequency' },
+  { step: 2, name: 'Preprocessing', tool: 'NumPy / SciPy', status: 'complete', description: 'Normalize, segment, and filter IQ data into fixed-length windows' },
+  { step: 3, name: 'Feature Extraction', tool: 'NumPy / Matplotlib', status: 'complete', description: 'Generate spectrograms, constellation diagrams, or raw IQ tensors' },
+  { step: 4, name: 'CNN Classifier', tool: 'PyTorch', status: 'active', description: 'Train and evaluate CNN model on RadioML dataset' },
   { step: 5, name: 'Post-Processing', tool: 'Python', status: 'planned', description: 'Confidence thresholding, multi-frame voting, result logging' },
   { step: 6, name: 'GNU Radio Integration', tool: 'gr-groundlink OOT', status: 'planned', description: 'Embed trained model as GNU Radio block for real-time classification' },
 ]
@@ -136,7 +136,7 @@ export const amrChain: SignalChain = {
   name: 'AMR Classification Pipeline',
   description: 'End-to-end automatic modulation recognition from RTL-SDR capture through ML inference.',
   phase: 5,
-  planned: true,
+  planned: false,
   blocks: [
     { label: 'RTL-SDR', type: 'hardware' },
     { label: 'IQ Capture', type: 'dsp' },
