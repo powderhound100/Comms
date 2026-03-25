@@ -3,28 +3,23 @@
 Separate from the scanner: tunes to a single frequency, demodulates
 audio (WFM, NFM, AM), and streams PCM + spectrum to the browser.
 
-Audio is sent as binary WebSocket frames (int16 PCM, ~20ms chunks).
-Spectrum is sent as JSON text frames (~2 Hz).
-
 Architecture:
-  - Background thread captures large IQ blocks (~250ms) for efficient DSP
-  - Demod runs once per block (decimate + de-emphasis via lfilter)
-  - Audio output is sliced into ~20ms chunks and queued
-  - Async send loop streams chunks at real-time pace
+  - Simple async loop: capture IQ via run_in_executor, demod, send JSON
+  - read_samples() blocking naturally paces the loop at real-time
+  - Audio sent as base64 float32 in JSON text frames
+  - Spectrum sent as JSON text frames every 3rd cycle
 
 Usage:
     python radio_server.py [--port 8770] [--freq 94.9] [--mode wfm]
 """
 
 import asyncio
+import base64
 import json
 import logging
-import struct
 import sys
 import os
-import threading
 import time
-from collections import deque
 from urllib.parse import urlparse, parse_qs
 
 import click
@@ -37,19 +32,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("radio")
-
-# ── Binary frame header ────────────────────────────────────────
-# 1 byte: mode (0=wfm, 1=nfm, 2=am)
-# 4 bytes: sample_rate (uint32 LE)
-# rest: int16 PCM samples (LE)
-
-MODE_IDS = {"wfm": 0, "nfm": 1, "am": 2}
-
-
-def pack_audio_frame(mode: str, sample_rate: int, audio_int16: np.ndarray) -> bytes:
-    """Pack audio into a binary frame: header + int16 PCM."""
-    header = struct.pack("<BI", MODE_IDS.get(mode, 0), sample_rate)
-    return header + audio_int16.tobytes()
 
 
 class RadioReceiver:
@@ -121,12 +103,16 @@ class RadioReceiver:
         return np.array([], dtype=np.float32), 48000
 
     def _demod_wfm(self, iq: np.ndarray) -> tuple[np.ndarray, int]:
-        """Wideband FM demodulation."""
+        """Wideband FM demodulation with multi-stage decimation.
+
+        2.4M → 480k → 96k → 48k  (factors: 5, 5, 2)
+        """
         phase_diff = np.angle(iq[1:] * np.conj(iq[:-1]))
         audio_rate = 48000
-        decim = max(1, self.sample_rate // audio_rate)
-        # zero_phase=False for real-time (causal only, much faster)
-        audio = sp_signal.decimate(phase_diff, decim, zero_phase=False)
+        # Multi-stage decimation (each factor ≤13 for stability)
+        audio = sp_signal.decimate(phase_diff, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 2, zero_phase=False)
         # De-emphasis (75 μs) via lfilter with persistent state
         b, a = self._deemph_coeffs(75e-6, audio_rate)
         if self._deemph_zi is None:
@@ -138,8 +124,12 @@ class RadioReceiver:
         return out.astype(np.float32), audio_rate
 
     def _demod_nfm(self, iq: np.ndarray) -> tuple[np.ndarray, int]:
-        """Narrowband FM demodulation."""
+        """Narrowband FM demodulation with multi-stage decimation.
+
+        2.4M → 480k → 96k → 16k  (factors: 5, 5, 6)
+        """
         phase_diff = np.angle(iq[1:] * np.conj(iq[:-1]))
+        # Narrow filter for voice
         nyq = self.sample_rate / 2
         cutoff = min(5000 / nyq, 0.99)
         try:
@@ -148,8 +138,10 @@ class RadioReceiver:
         except Exception:
             pass
         audio_rate = 16000
-        decim = max(1, self.sample_rate // audio_rate)
-        audio = sp_signal.decimate(phase_diff, decim, zero_phase=False)
+        # Multi-stage decimation (each factor ≤13 for stability)
+        audio = sp_signal.decimate(phase_diff, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 6, zero_phase=False)
         # De-emphasis (50 μs) via lfilter with persistent state
         b, a = self._deemph_coeffs(50e-6, audio_rate)
         if self._deemph_zi is None:
@@ -161,7 +153,10 @@ class RadioReceiver:
         return out.astype(np.float32), audio_rate
 
     def _demod_am(self, iq: np.ndarray) -> tuple[np.ndarray, int]:
-        """AM envelope detection."""
+        """AM envelope detection with multi-stage decimation.
+
+        2.4M → 480k → 96k → 16k  (factors: 5, 5, 6)
+        """
         envelope = np.abs(iq)
         envelope = envelope - np.mean(envelope)
         nyq = self.sample_rate / 2
@@ -171,8 +166,10 @@ class RadioReceiver:
         except Exception:
             pass
         audio_rate = 16000
-        decim = max(1, self.sample_rate // audio_rate)
-        audio = sp_signal.decimate(envelope, decim, zero_phase=False)
+        # Multi-stage decimation (each factor ≤13 for stability)
+        audio = sp_signal.decimate(envelope, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 5, zero_phase=False)
+        audio = sp_signal.decimate(audio, 6, zero_phase=False)
         peak = np.max(np.abs(audio))
         if peak > 0:
             audio = audio / peak * 0.9
@@ -182,90 +179,14 @@ class RadioReceiver:
         """Compute PSD in dBFS for spectrum display."""
         freqs, psd = sp_signal.welch(iq, fs=self.sample_rate, nperseg=1024, return_onesided=False)
         psd_db = 10 * np.log10(psd + 1e-12)
+        # Reorder so negative freqs come first (DC in center)
         n = len(psd_db)
         psd_db = np.concatenate([psd_db[n // 2:], psd_db[:n // 2]])
         return psd_db.tolist()
 
 
-def producer_thread(
-    receiver: RadioReceiver,
-    audio_queue: deque,
-    spectrum_queue: deque,
-    stop_event: threading.Event,
-):
-    """Background thread: capture large IQ blocks, demod in bulk, slice into 20ms chunks.
-
-    This keeps expensive DSP (decimate, lfilter) efficient by processing ~250ms
-    blocks, then slicing the output audio into small chunks for low-latency streaming.
-    """
-    # ~250ms at 2.4 Msps = 600,000 complex samples
-    CAPTURE_SAMPLES = 600_000
-    spectrum_counter = 0
-
-    while not stop_event.is_set():
-        if not receiver.sdr:
-            stop_event.wait(0.5)
-            continue
-        try:
-            t0 = time.monotonic()
-
-            iq = receiver.sdr.read_samples(CAPTURE_SAMPLES)
-
-            # Demod entire block at once (efficient: 1 decimate + 1 lfilter call)
-            audio, audio_rate = receiver.demod(iq)
-            if len(audio) == 0:
-                continue
-
-            # Convert to int16 once for the whole block
-            audio_int16 = np.clip(audio * 32767, -32768, 32767).astype(np.int16)
-
-            # Slice into ~20ms chunks
-            chunk_size = int(audio_rate * 0.020)  # 960 @ 48kHz, 320 @ 16kHz
-            mode = receiver.mode
-            for offset in range(0, len(audio_int16), chunk_size):
-                chunk = audio_int16[offset:offset + chunk_size]
-                if len(chunk) == 0:
-                    break
-                frame = pack_audio_frame(mode, audio_rate, chunk)
-                audio_queue.append(frame)
-
-            # Trim queue if way too deep (> 2s of audio chunks)
-            max_chunks = int(2.0 / 0.020)  # 100 chunks
-            while len(audio_queue) > max_chunks:
-                audio_queue.popleft()
-
-            # Spectrum every other capture (~500ms)
-            spectrum_counter += 1
-            if spectrum_counter >= 2:
-                spectrum_counter = 0
-                psd = receiver.compute_psd(iq)
-                # Only keep latest spectrum
-                spectrum_queue.clear()
-                spectrum_queue.append(json.dumps({
-                    "type": "spectrum",
-                    "psd_dbfs": psd[::4],
-                    "center_freq_hz": receiver.freq_hz,
-                    "bandwidth_hz": receiver.sample_rate,
-                }))
-
-            elapsed = time.monotonic() - t0
-            capture_ms = CAPTURE_SAMPLES / receiver.sample_rate * 1000
-            logger.info(
-                "%.0fms IQ → %d samples → %d chunks (%.0fms wall, %.1fx RT)",
-                capture_ms,
-                len(audio),
-                len(audio_int16) // max(chunk_size, 1),
-                elapsed * 1000,
-                capture_ms / max(elapsed * 1000, 1),
-            )
-
-        except Exception as e:
-            logger.warning("Producer error: %s", e)
-            stop_event.wait(0.2)
-
-
 async def radio_handler(websocket, receiver: RadioReceiver):
-    """Handle a single WebSocket client — stream binary audio + JSON spectrum."""
+    """Handle a single WebSocket client — stream audio + spectrum."""
     import websockets
 
     # Parse tune params from URL
@@ -284,18 +205,6 @@ async def radio_handler(websocket, receiver: RadioReceiver):
     receiver._clients.add(websocket)
     logger.info("Client connected (%d total)", len(receiver._clients))
 
-    # Queues filled by producer thread
-    audio_queue: deque = deque()
-    spectrum_queue: deque = deque()
-    stop_event = threading.Event()
-
-    prod_thread = threading.Thread(
-        target=producer_thread,
-        args=(receiver, audio_queue, spectrum_queue, stop_event),
-        daemon=True,
-    )
-    prod_thread.start()
-
     try:
         # Read loop — handle tune commands from client
         async def read_commands():
@@ -308,8 +217,6 @@ async def radio_handler(websocket, receiver: RadioReceiver):
                                 int(data.get("freq_hz", receiver.freq_hz)),
                                 data.get("mode", receiver.mode),
                             )
-                            # Flush stale audio from queue on retune
-                            audio_queue.clear()
                     except Exception:
                         pass
             except websockets.exceptions.ConnectionClosed:
@@ -317,41 +224,74 @@ async def radio_handler(websocket, receiver: RadioReceiver):
 
         cmd_task = asyncio.create_task(read_commands())
 
-        # Stream loop — drain queues as fast as possible.
-        # No server-side pacing needed: the producer is real-time-paced
-        # by SDR read_samples() blocking, and the client AudioWorklet
-        # ring buffer handles playback timing.  On Windows asyncio.sleep
-        # has ~15.6ms resolution so per-chunk pacing halves throughput.
+        # Stream loop — capture, demod, send (simple async loop)
+        # read_samples() blocking call naturally paces at real-time
+        frame_count = 0
+        loop = asyncio.get_event_loop()
         while True:
+            if not receiver.sdr:
+                await asyncio.sleep(1)
+                continue
+
             try:
-                sent = 0
+                t0 = time.monotonic()
 
-                # Send all pending spectrum data (text frames)
-                while spectrum_queue:
-                    spectrum_json = spectrum_queue.popleft()
-                    await websocket.send(spectrum_json)
-                    sent += 1
+                # Capture ~218ms of IQ at 2.4 Msps
+                iq = await loop.run_in_executor(
+                    None, receiver.sdr.read_samples, 524288
+                )
+                t_capture = time.monotonic()
 
-                # Drain all pending audio chunks (binary frames)
-                while audio_queue:
-                    frame = audio_queue.popleft()
-                    await websocket.send(frame)
-                    sent += 1
+                # Demod to audio
+                audio, audio_rate = receiver.demod(iq)
+                t_demod = time.monotonic()
 
-                if sent == 0:
-                    # No data yet — yield briefly
-                    await asyncio.sleep(0.005)
+                # Encode audio as base64 float32
+                audio_b64 = base64.b64encode(audio.tobytes()).decode('ascii')
+
+                # Send audio chunk
+                await websocket.send(json.dumps({
+                    "type": "audio",
+                    "samples": audio_b64,
+                    "sample_rate": audio_rate,
+                    "freq_hz": receiver.freq_hz,
+                    "mode": receiver.mode,
+                }))
+                t_send = time.monotonic()
+
+                # Send spectrum every 3rd frame
+                frame_count += 1
+                if frame_count % 3 == 0:
+                    psd = receiver.compute_psd(iq)
+                    await websocket.send(json.dumps({
+                        "type": "spectrum",
+                        "psd_dbfs": psd[::4],
+                        "center_freq_hz": receiver.freq_hz,
+                        "bandwidth_hz": receiver.sample_rate,
+                    }))
+
+                # Timing log
+                capture_ms = (t_capture - t0) * 1000
+                demod_ms = (t_demod - t_capture) * 1000
+                send_ms = (t_send - t_demod) * 1000
+                total_ms = (t_send - t0) * 1000
+                audio_dur_ms = len(audio) / audio_rate * 1000
+                logger.info(
+                    "Cycle: capture=%.0fms demod=%.0fms send=%.0fms total=%.0fms (%.0fms audio)",
+                    capture_ms, demod_ms, send_ms, total_ms, audio_dur_ms,
+                )
 
             except websockets.exceptions.ConnectionClosed:
                 break
             except Exception as e:
                 logger.warning("Stream error: %s", e)
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
+
+            await asyncio.sleep(0.005)  # Yield
 
     except Exception:
         pass
     finally:
-        stop_event.set()
         receiver._clients.discard(websocket)
         logger.info("Client disconnected (%d remaining)", len(receiver._clients))
 
@@ -374,7 +314,7 @@ def main(port, freq, mode):
         logger.info("GROUNDLINK Radio")
         logger.info("Frequency: %.3f MHz [%s]", freq, mode.upper())
         logger.info("WebSocket: ws://0.0.0.0:%d", port)
-        logger.info("Audio: binary int16 PCM, 20ms chunks (bulk demod)")
+        logger.info("Audio: JSON base64 float32, ~218ms chunks")
         logger.info("=" * 50)
 
         async with websockets.serve(

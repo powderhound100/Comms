@@ -112,26 +112,6 @@ const colorMap: Record<string, { bg: string; text: string; border: string; ring:
   violet:  { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/30', ring: 'ring-violet-500/40', dot: 'bg-violet-400' },
 }
 
-// Binary frame header: 1 byte mode + 4 bytes sampleRate (LE uint32)
-const HEADER_SIZE = 5
-const MODE_NAMES = ['wfm', 'nfm', 'am'] as const
-
-function parseAudioFrame(buf: ArrayBuffer): { mode: string; sampleRate: number; samples: Float32Array } | null {
-  if (buf.byteLength < HEADER_SIZE + 2) return null
-  const view = new DataView(buf)
-  const modeId = view.getUint8(0)
-  const sampleRate = view.getUint32(1, true) // little-endian
-  const mode = MODE_NAMES[modeId] ?? 'wfm'
-
-  // Convert int16 PCM → float32 [-1, 1]
-  const int16 = new Int16Array(buf, HEADER_SIZE)
-  const float32 = new Float32Array(int16.length)
-  for (let i = 0; i < int16.length; i++) {
-    float32[i] = int16[i] / 32768
-  }
-  return { mode, sampleRate, samples: float32 }
-}
-
 // ──────────────────────────────────────────────────────────────
 // Spectrum analyser (canvas)
 // ──────────────────────────────────────────────────────────────
@@ -251,12 +231,6 @@ export default function RadioPage() {
   const gainNodeRef = useRef<GainNode | null>(null)
   const workletNodeRef = useRef<AudioWorkletNode | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  const jitterCountRef = useRef(0)
-  const jitterBufferRef = useRef<Float32Array[]>([])
-  const playbackStartedRef = useRef(false)
-
-  // Jitter buffer: accumulate ~100ms (~5 chunks at 20ms) before starting
-  const JITTER_CHUNKS = 5
 
   useSpectrumCanvas(canvasRef, psdData, freq, 2.4e6)
 
@@ -270,10 +244,6 @@ export default function RadioPage() {
     // Send tune command over existing WebSocket if connected
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: newFreq, mode: newMode }))
-      // Reset jitter buffer for clean transition
-      jitterCountRef.current = 0
-      jitterBufferRef.current = []
-      playbackStartedRef.current = false
       workletNodeRef.current?.port.postMessage({ type: 'clear' })
     }
 
@@ -299,9 +269,6 @@ export default function RadioPage() {
       audioCtxRef.current?.close()
       audioCtxRef.current = null
       gainNodeRef.current = null
-      jitterCountRef.current = 0
-      jitterBufferRef.current = []
-      playbackStartedRef.current = false
       setPlaying(false)
       setConnected(false)
       setBufferPct(0)
@@ -338,15 +305,9 @@ export default function RadioPage() {
       }
     }
 
-    // Reset jitter state
-    jitterCountRef.current = 0
-    jitterBufferRef.current = []
-    playbackStartedRef.current = false
-
-    // Connect WebSocket with binary mode
+    // Connect WebSocket (JSON text frames)
     const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
     const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
@@ -354,41 +315,23 @@ export default function RadioPage() {
     ws.onerror = () => { /* will trigger onclose */ }
 
     ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        // Binary frame — audio data
-        const parsed = parseAudioFrame(event.data)
-        if (!parsed) return
-
-        if (actx.state === 'suspended') actx.resume()
-
-        if (!playbackStartedRef.current) {
-          // Jitter buffering phase
-          jitterBufferRef.current.push(parsed.samples)
-          jitterCountRef.current++
-          if (jitterCountRef.current >= JITTER_CHUNKS) {
-            // Flush jitter buffer into worklet
-            for (const chunk of jitterBufferRef.current) {
-              workletNode.port.postMessage({ type: 'audio', samples: chunk })
-            }
-            jitterBufferRef.current = []
-            playbackStartedRef.current = true
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'audio' && data.samples) {
+          if (actx.state === 'suspended') actx.resume()
+          // Decode base64 float32 → push to AudioWorklet
+          const raw = atob(data.samples)
+          const bytes = new Uint8Array(raw.length)
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+          const floats = new Float32Array(bytes.buffer)
+          workletNode.port.postMessage({ type: 'audio', samples: floats })
+        } else if (data.type === 'spectrum') {
+          setPsdData(data.psd_dbfs)
+          if (data.psd_dbfs?.length) {
+            setSignalStrength(Math.max(...data.psd_dbfs))
           }
-        } else {
-          // Normal streaming — post directly to worklet
-          workletNode.port.postMessage({ type: 'audio', samples: parsed.samples })
         }
-      } else {
-        // Text frame — spectrum JSON
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'spectrum') {
-            setPsdData(data.psd_dbfs)
-            if (data.psd_dbfs?.length) {
-              setSignalStrength(Math.max(...data.psd_dbfs))
-            }
-          }
-        } catch { /* skip */ }
-      }
+      } catch { /* skip non-JSON */ }
     }
   }, [playing, freq, mode, volume])
 
@@ -689,7 +632,7 @@ export default function RadioPage() {
             with digital signal processing in software. The RTL-SDR digitises a slice of RF
             spectrum as IQ (in-phase / quadrature) samples at 2.4 Msps. A Python backend performs
             demodulation — phase differentiation for FM, envelope detection for AM — then decimates
-            and streams the resulting audio over a binary WebSocket to the browser, where an
+            and streams the resulting audio as base64 JSON over WebSocket to the browser, where an
             AudioWorklet ring buffer plays it back with gapless scheduling.
           </p>
         </div>
