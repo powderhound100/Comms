@@ -158,96 +158,110 @@ export default function ScanDetectPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // WebSocket connection for live data
-  useEffect(() => {
-    const connectWs = () => {
-      try {
-        // Auto-detect WebSocket URL: use localhost for local dev,
-        // or proxy through scanner subdomain for remote access
-        const wsUrl = window.location.hostname === 'localhost'
-          ? 'ws://localhost:8765'
-          : `wss://scanner.${window.location.hostname.replace('groundlink.', '')}`
-        const ws = new WebSocket(wsUrl)
-        wsRef.current = ws
+  // Handle incoming scanner message (shared by WS and SSE)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleScannerMessage = useCallback((data: any) => {
+    if (data.type === 'spectrum') {
+      waterfallBuffer.current.push(data.psd_dbfs)
+      if (waterfallBuffer.current.length > 300) {
+        waterfallBuffer.current.shift()
+      }
+      drawWaterfall(data.psd_dbfs, data.center_freq_hz, data.bandwidth_hz)
+    }
 
-        ws.onopen = () => setWsConnected(true)
-        ws.onclose = () => {
-          setWsConnected(false)
-          // Reconnect after delay
-          setTimeout(connectWs, 5000)
-        }
-        ws.onerror = () => ws.close()
+    if (data.type === 'detection') {
+      const newDetection: ScanDetection = {
+        id: Date.now(),
+        detected_at: data.timestamp,
+        frequency_hz: data.frequency_hz,
+        bandwidth_hz: data.bandwidth_hz,
+        snr_db: data.snr_db,
+        modulation: data.modulation,
+        confidence: data.confidence,
+        model_used: 'vtcnn2',
+        inference_ms: null,
+        known_signal: data.known_signal,
+        demod_type: data.demod_type,
+        demod_preview: data.demod_preview,
+        protocol: data.protocol || null,
+        decoded_summary: data.decoded_summary || null,
+        decoded_data: data.decoded_data || null,
+      }
+      setDetections(prev => [newDetection, ...prev].slice(0, 200))
 
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data)
+      if (data.protocol === 'adsb' && data.decoded_data?.aircraft_table) {
+        const table = data.decoded_data.aircraft_table as Record<string, TrackedAircraft>
+        const acList = Object.values(table)
+        setAircraft(acList)
 
-          if (data.type === 'spectrum') {
-            // Add to waterfall buffer
-            waterfallBuffer.current.push(data.psd_dbfs)
-            if (waterfallBuffer.current.length > 300) {
-              waterfallBuffer.current.shift()
+        setTrails(prev => {
+          const next = { ...prev }
+          acList.forEach(ac => {
+            if (ac.latitude != null && ac.longitude != null) {
+              const existing = next[ac.icao_hex] || []
+              const lastPos = existing[existing.length - 1]
+              if (!lastPos || lastPos[0] !== ac.latitude || lastPos[1] !== ac.longitude) {
+                next[ac.icao_hex] = [...existing, [ac.latitude!, ac.longitude!] as [number, number]].slice(-100)
+              }
             }
-            drawWaterfall(data.psd_dbfs, data.center_freq_hz, data.bandwidth_hz)
-          }
-
-          if (data.type === 'detection') {
-            const newDetection: ScanDetection = {
-              id: Date.now(),
-              detected_at: data.timestamp,
-              frequency_hz: data.frequency_hz,
-              bandwidth_hz: data.bandwidth_hz,
-              snr_db: data.snr_db,
-              modulation: data.modulation,
-              confidence: data.confidence,
-              model_used: 'vtcnn2',
-              inference_ms: null,
-              known_signal: data.known_signal,
-              demod_type: data.demod_type,
-              demod_preview: data.demod_preview,
-              protocol: data.protocol || null,
-              decoded_summary: data.decoded_summary || null,
-              decoded_data: data.decoded_data || null,
-            }
-            setDetections(prev => [newDetection, ...prev].slice(0, 200))
-
-            // Update aircraft table and trails from ADS-B detections
-            if (data.protocol === 'adsb' && data.decoded_data?.aircraft_table) {
-              const table = data.decoded_data.aircraft_table as Record<string, TrackedAircraft>
-              const acList = Object.values(table)
-              setAircraft(acList)
-
-              // Append new positions to trails
-              setTrails(prev => {
-                const next = { ...prev }
-                acList.forEach(ac => {
-                  if (ac.latitude != null && ac.longitude != null) {
-                    const existing = next[ac.icao_hex] || []
-                    const lastPos = existing[existing.length - 1]
-                    // Only add if position actually changed
-                    if (!lastPos || lastPos[0] !== ac.latitude || lastPos[1] !== ac.longitude) {
-                      next[ac.icao_hex] = [...existing, [ac.latitude!, ac.longitude!] as [number, number]].slice(-100)
-                    }
-                  }
-                })
-                return next
-              })
-            }
-          }
-
-          if (data.type === 'status') {
-            setStatus(prev => ({ ...prev, ...data }))
-          }
-        }
-      } catch {
-        setTimeout(connectWs, 5000)
+          })
+          return next
+        })
       }
     }
 
-    connectWs()
-    return () => {
-      wsRef.current?.close()
+    if (data.type === 'status') {
+      setStatus(prev => ({ ...prev, ...data }))
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Live data connection: WebSocket on localhost, SSE proxy on remote
+  useEffect(() => {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    let cleanup: (() => void) | null = null
+
+    if (isLocal) {
+      // Direct WebSocket to scanner
+      const connectWs = () => {
+        try {
+          const ws = new WebSocket('ws://localhost:8765')
+          wsRef.current = ws
+          ws.onopen = () => setWsConnected(true)
+          ws.onclose = () => {
+            setWsConnected(false)
+            setTimeout(connectWs, 5000)
+          }
+          ws.onerror = () => ws.close()
+          ws.onmessage = (event) => {
+            try { handleScannerMessage(JSON.parse(event.data)) } catch { /* skip */ }
+          }
+        } catch {
+          setTimeout(connectWs, 5000)
+        }
+      }
+      connectWs()
+      cleanup = () => wsRef.current?.close()
+    } else {
+      // SSE proxy through Next.js server
+      const connectSse = () => {
+        const es = new EventSource('/api/scanner/stream')
+        es.onopen = () => setWsConnected(true)
+        es.onmessage = (event) => {
+          try { handleScannerMessage(JSON.parse(event.data)) } catch { /* skip */ }
+        }
+        es.onerror = () => {
+          setWsConnected(false)
+          es.close()
+          setTimeout(connectSse, 5000)
+        }
+        cleanup = () => es.close()
+      }
+      connectSse()
+    }
+
+    return () => cleanup?.()
+  }, [handleScannerMessage])
 
   const drawWaterfall = useCallback((psd: number[], centerFreq: number, bandwidth: number) => {
     const canvas = canvasRef.current
