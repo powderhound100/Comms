@@ -1,3 +1,5 @@
+'use client'
+
 import dynamic from 'next/dynamic'
 
 const BERCurvePlot = dynamic(() => import('@/components/BERCurvePlot'), { ssr: false })
