@@ -145,8 +145,9 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
         })
 
     async def handle_start(request):
+        # If already running, stop first then restart with new config
         if scanner.is_running:
-            return web.json_response({"error": "Already running"}, status=400)
+            await scanner.stop()
 
         # Apply runtime config from request body
         try:
@@ -179,7 +180,7 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
 
     async def handle_stop(request):
         if not scanner.is_running:
-            return web.json_response({"error": "Not running"}, status=400)
+            return web.json_response({"status": "already_stopped"})
         await scanner.stop()
         return web.json_response({"status": "stopped"})
 
