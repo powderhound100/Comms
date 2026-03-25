@@ -36,7 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               GROUNDLINK
             </Link>
             {/* Desktop nav */}
-            <div className="hidden lg:flex gap-4 overflow-x-auto">
+            <div className="hidden lg:flex gap-4 overflow-x-auto scrollbar-hide">
               {navLinks.map(link => (
                 <Link
                   key={link.href}
