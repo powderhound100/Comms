@@ -17,6 +17,8 @@ const navLinks = [
   { href: '/gnu-radio', label: 'GNU Radio' },
   { href: '/ground-station', label: 'Ground Station' },
   { href: '/signal-recognition', label: 'Signal Recognition' },
+  { href: '/imagery', label: 'Imagery' },
+  { href: '/signal-monitor', label: 'Signal Monitor' },
   { href: '/ads-b', label: 'ADS-B' },
   { href: '/references', label: 'References' },
 ]

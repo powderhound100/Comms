@@ -63,3 +63,54 @@ export interface SatellitePass {
   durationSec: number
   predictedCn0Dbhz: number
 }
+
+// ── Satellite Imagery ──
+
+export interface ImageChannel {
+  name: string
+  type: 'visible' | 'infrared' | 'composite' | 'enhanced'
+  path: string
+  resolution: string
+}
+
+export interface SignalQuality {
+  snrDb: number
+  cn0Dbhz: number
+  lockPercentage: number
+  viterbiBer: number
+  rsErrors: number
+}
+
+export interface SatelliteImagery {
+  id: string
+  satellite: string
+  captureType: 'LRIT' | 'LRPT' | 'APT'
+  capturedAt: string
+  imagePaths: string[]
+  thumbnailPath: string
+  channels: ImageChannel[]
+  decodeStatus: 'pending' | 'decoding' | 'complete' | 'failed'
+  signalQuality: SignalQuality
+}
+
+export interface SatDumpConfig {
+  satellite: string
+  pipelineName: string
+  inputFormat: string
+  sampleRate: number
+  frequency: number
+  outputProducts: string[]
+}
+
+// ── Signal Monitor ──
+
+export interface ClassificationResult {
+  timestamp: string
+  frequencyMhz: number
+  bandwidthKhz: number
+  modulationType: string
+  confidence: number
+  snrDb: number
+  modelUsed: string
+  inferenceTimeMs: number
+}

@@ -5,6 +5,7 @@ export default function Home() {
     { num: 3, title: 'CCSDS TM Waveform', status: 'Complete', desc: 'GNU Radio CCSDS modem, BER vs Eb/N₀ curves' },
     { num: 4, title: 'Over-the-Air Loopback', status: 'Complete', desc: 'SDR hardware TX/RX, AES-256 encryption, ICD document' },
     { num: 5, title: 'Integration Dashboard', status: 'Active', desc: 'Next.js dashboard, documentation, blog series' },
+    { num: 6, title: 'Signal Recognition & Imagery', status: 'Active', desc: 'ML-based AMR, satellite imagery decoding, AI signal monitor' },
   ]
 
   return (
@@ -62,6 +63,27 @@ export default function Home() {
           <div><span className="text-gray-500">SDR (RX):</span> RTL-SDR Blog V4</div>
           <div><span className="text-gray-500">SDR (TX):</span> ADALM-Pluto</div>
           <div><span className="text-gray-500">Total Cost:</span> ~$305</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <h2 className="text-lg font-semibold mb-3">Satellite Imagery</h2>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div><span className="text-gray-500">Satellites:</span> GOES-18, Meteor-M2-3, NOAA-19</div>
+            <div><span className="text-gray-500">Decoder:</span> SatDump CLI</div>
+            <div><span className="text-gray-500">Products:</span> LRIT, LRPT, APT imagery</div>
+            <div><span className="text-gray-500">Gallery:</span> 5 decoded images</div>
+          </div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <h2 className="text-lg font-semibold mb-3">Signal Monitor</h2>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div><span className="text-gray-500">ML Models:</span> VTCNN2, ResNet1D</div>
+            <div><span className="text-gray-500">Known Signals:</span> 8 cataloged</div>
+            <div><span className="text-gray-500">Bands:</span> VHF, UHF, L-band, S-band</div>
+            <div><span className="text-gray-500">Status:</span> AI classification active</div>
+          </div>
         </div>
       </div>
     </div>
