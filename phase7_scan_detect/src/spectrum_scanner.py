@@ -268,9 +268,8 @@ class SpectrumScanner:
                 # Dwell time
                 await asyncio.sleep(self.config.dwell_time_ms / 1000.0)
 
-            # In watch mode, loop continuously on the same frequency
-            if self.config.mode == "watch":
-                continue
+            # Loop continuously in all modes (sweep restarts from the beginning)
+            continue
 
     def _frequency_steps(self) -> list[int]:
         """Generate list of center frequencies for the sweep."""
