@@ -1,10 +1,12 @@
 """Basic demodulation for detected and classified signals."""
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 from scipy import signal as sp_signal
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ class DemodResult:
 class Demodulator:
     """Demodulate detected signals based on their classified modulation type."""
 
-    SUPPORTED = {"WBFM", "AM-DSB", "AM-SSB", "BPSK", "QPSK", "8PSK"}
+    SUPPORTED = {"WBFM", "NFM", "AM-DSB", "AM-SSB", "BPSK", "QPSK", "8PSK"}
 
     def __init__(self, audio_output_dir: str = "output/audio", max_duration_sec: float = 10.0):
         self.audio_dir = Path(audio_output_dir)
@@ -60,7 +62,9 @@ class Demodulator:
 
         try:
             if modulation == "WBFM":
-                return self._demod_fm(segment, sample_rate)
+                return self._demod_fm(segment, sample_rate, wideband=True)
+            elif modulation == "NFM":
+                return self._demod_fm(segment, sample_rate, wideband=False)
             elif modulation in ("AM-DSB", "AM-SSB"):
                 return self._demod_am(segment, sample_rate)
             elif modulation in ("BPSK", "QPSK", "8PSK"):

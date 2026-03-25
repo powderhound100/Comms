@@ -223,6 +223,7 @@ class ProtocolDecoder:
         preamble = np.array([1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0], dtype=np.float32)
         threshold = 0.3
         messages_decoded = 0
+        preambles_unverified = []
         positions = []
 
         # Slide through the envelope looking for preambles
@@ -264,38 +265,48 @@ class ProtocolDecoder:
                     val = (val << 1) | bits[byte_idx * 8 + bit_idx]
                 msg_bytes.append(val)
 
-            # CRC-24 check — ADS-B uses a 24-bit CRC (last 3 bytes)
-            if not self._check_adsb_crc(msg_bytes):
-                i += 1
-                continue
-
+            # CRC-24 check
+            crc_ok = self._check_adsb_crc(msg_bytes)
             msg_hex = msg_bytes.hex().upper()
 
             # Check downlink format (DF) — first 5 bits
             df = (msg_bytes[0] >> 3) & 0x1F
 
             if df == 17:  # ADS-B Extended Squitter
-                aircraft = self._parse_adsb_message(msg_bytes)
-                if aircraft:
-                    self._aircraft[aircraft.icao_hex] = aircraft
-                    messages_decoded += 1
-                    if aircraft.latitude is not None:
-                        positions.append({
-                            "icao": aircraft.icao_hex,
-                            "callsign": aircraft.callsign,
-                            "lat": aircraft.latitude,
-                            "lon": aircraft.longitude,
-                            "alt_ft": aircraft.altitude_ft,
-                            "speed_kt": aircraft.ground_speed_kt,
-                            "heading": aircraft.heading_deg,
-                        })
+                if crc_ok:
+                    aircraft = self._parse_adsb_message(msg_bytes)
+                    if aircraft:
+                        self._aircraft[aircraft.icao_hex] = aircraft
+                        messages_decoded += 1
+                        if aircraft.latitude is not None:
+                            positions.append({
+                                "icao": aircraft.icao_hex,
+                                "callsign": aircraft.callsign,
+                                "lat": aircraft.latitude,
+                                "lon": aircraft.longitude,
+                                "alt_ft": aircraft.altitude_ft,
+                                "speed_kt": aircraft.ground_speed_kt,
+                                "heading": aircraft.heading_deg,
+                            })
+                else:
+                    # CRC failed but DF17 preamble matched — log as unverified
+                    icao = msg_bytes[1:4].hex().upper()
+                    tc = (msg_bytes[4] >> 3) & 0x1F
+                    preambles_unverified.append({
+                        "icao": icao, "tc": tc, "hex": msg_hex, "crc": False,
+                    })
 
             i += msg_len_samples  # Skip past this message
 
-        if messages_decoded == 0:
+        # Return result if we found anything — verified or unverified
+        if messages_decoded == 0 and len(preambles_unverified) == 0:
             return None
 
-        summary_parts = [f"{messages_decoded} ADS-B msgs"]
+        summary_parts = []
+        if messages_decoded > 0:
+            summary_parts.append(f"{messages_decoded} verified ADS-B msgs")
+        if preambles_unverified:
+            summary_parts.append(f"{len(preambles_unverified)} unverified")
         if positions:
             p = positions[0]
             summary_parts.append(
@@ -310,6 +321,8 @@ class ProtocolDecoder:
             summary=" | ".join(summary_parts),
             fields={
                 "messages_decoded": messages_decoded,
+                "preambles_unverified": len(preambles_unverified),
+                "unverified_icaos": list({p["icao"] for p in preambles_unverified}),
                 "aircraft_tracked": len(self._aircraft),
                 "positions": positions,
                 "aircraft_table": {
