@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import Link from 'next/link'
+import MobileNav from '@/components/MobileNav'
 
 export const metadata: Metadata = {
   title: 'GROUNDLINK Dashboard',
@@ -28,24 +29,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-gray-950 text-gray-100 min-h-screen">
         <nav className="bg-gray-900 border-b border-gray-800">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-8">
-            <Link href="/" className="text-xl font-bold text-emerald-400">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <Link href="/" className="text-xl font-bold text-emerald-400 shrink-0">
               GROUNDLINK
             </Link>
-            <div className="flex gap-4">
+            {/* Desktop nav */}
+            <div className="hidden lg:flex gap-4 overflow-x-auto">
               {navLinks.map(link => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="text-sm text-gray-400 hover:text-white transition-colors"
+                  className="text-sm text-gray-400 hover:text-white transition-colors whitespace-nowrap"
                 >
                   {link.label}
                 </Link>
               ))}
             </div>
+            {/* Mobile nav */}
+            <MobileNav links={navLinks} />
           </div>
         </nav>
-        <main className="max-w-7xl mx-auto px-4 py-8">
+        <main className="max-w-7xl mx-auto px-4 py-6 sm:py-8">
           {children}
         </main>
       </body>
