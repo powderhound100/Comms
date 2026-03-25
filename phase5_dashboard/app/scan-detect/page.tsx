@@ -162,7 +162,12 @@ export default function ScanDetectPage() {
   useEffect(() => {
     const connectWs = () => {
       try {
-        const ws = new WebSocket('ws://localhost:8765')
+        // Auto-detect WebSocket URL: use localhost for local dev,
+        // or proxy through scanner subdomain for remote access
+        const wsUrl = window.location.hostname === 'localhost'
+          ? 'ws://localhost:8765'
+          : `wss://scanner.${window.location.hostname.replace('groundlink.', '')}`
+        const ws = new WebSocket(wsUrl)
         wsRef.current = ws
 
         ws.onopen = () => setWsConnected(true)

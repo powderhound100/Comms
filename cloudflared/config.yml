@@ -4,4 +4,8 @@ credentials-file: /etc/cloudflared/credentials.json
 ingress:
   - hostname: groundlink.powderhound420.com
     service: http://groundlink-dashboard:3001
+  - hostname: scanner.powderhound420.com
+    service: http://host.docker.internal:8765
+  - hostname: scanner-api.powderhound420.com
+    service: http://host.docker.internal:8766
   - service: http_status:404

@@ -7,6 +7,11 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"
+    environment:
+      - SCANNER_API_URL=http://host.docker.internal:8766
+      - SCANNER_WS_URL=ws://host.docker.internal:8765
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -15,5 +20,7 @@ services:
     command: tunnel --config /etc/cloudflared/config.yml run groundlink
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - groundlink-dashboard
