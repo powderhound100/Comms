@@ -249,12 +249,14 @@ def producer_thread(
                 }))
 
             elapsed = time.monotonic() - t0
-            logger.debug(
-                "Demod %.0fms IQ → %d audio samples → %d chunks (took %.1fms)",
-                CAPTURE_SAMPLES / receiver.sample_rate * 1000,
+            capture_ms = CAPTURE_SAMPLES / receiver.sample_rate * 1000
+            logger.info(
+                "%.0fms IQ → %d samples → %d chunks (%.0fms wall, %.1fx RT)",
+                capture_ms,
                 len(audio),
-                len(audio_int16) // chunk_size,
+                len(audio_int16) // max(chunk_size, 1),
                 elapsed * 1000,
+                capture_ms / max(elapsed * 1000, 1),
             )
 
         except Exception as e:
@@ -315,22 +317,29 @@ async def radio_handler(websocket, receiver: RadioReceiver):
 
         cmd_task = asyncio.create_task(read_commands())
 
-        # Stream loop — send audio chunks at real-time pace
+        # Stream loop — drain queues as fast as possible.
+        # No server-side pacing needed: the producer is real-time-paced
+        # by SDR read_samples() blocking, and the client AudioWorklet
+        # ring buffer handles playback timing.  On Windows asyncio.sleep
+        # has ~15.6ms resolution so per-chunk pacing halves throughput.
         while True:
             try:
+                sent = 0
+
                 # Send all pending spectrum data (text frames)
                 while spectrum_queue:
                     spectrum_json = spectrum_queue.popleft()
                     await websocket.send(spectrum_json)
+                    sent += 1
 
-                # Send one audio chunk (binary frame)
-                if audio_queue:
+                # Drain all pending audio chunks (binary frames)
+                while audio_queue:
                     frame = audio_queue.popleft()
                     await websocket.send(frame)
-                    # Pace at ~20ms per chunk
-                    await asyncio.sleep(0.018)
-                else:
-                    # No data yet — wait briefly
+                    sent += 1
+
+                if sent == 0:
+                    # No data yet — yield briefly
                     await asyncio.sleep(0.005)
 
             except websockets.exceptions.ConnectionClosed:
