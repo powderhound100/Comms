@@ -1,7 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+
+// Leaflet needs window — dynamic import with SSR disabled
+const AircraftMap = dynamic(() => import('@/components/AircraftMap'), { ssr: false })
 import {
   scanPipelineChain,
   defaultScanBands,
@@ -108,6 +112,26 @@ export default function ScanDetectPage() {
   })
   const [detections, setDetections] = useState<ScanDetection[]>(demoDetections)
   const [aircraft, setAircraft] = useState<TrackedAircraft[]>(demoAircraft)
+  const [trails, setTrails] = useState<Record<string, [number, number][]>>(() => {
+    // Initialize demo trails
+    const t: Record<string, [number, number][]> = {}
+    demoAircraft.forEach(ac => {
+      if (ac.latitude != null && ac.longitude != null) {
+        // Generate a short demo trail behind each aircraft
+        const hdg = ((ac.heading_deg ?? 0) + 180) * Math.PI / 180
+        const points: [number, number][] = []
+        for (let i = 5; i >= 0; i--) {
+          const dist = i * 0.05
+          points.push([
+            ac.latitude! + Math.cos(hdg) * dist,
+            ac.longitude! + Math.sin(hdg) * dist,
+          ])
+        }
+        t[ac.icao_hex] = points
+      }
+    })
+    return t
+  })
   const [wsConnected, setWsConnected] = useState(false)
   const [scanMode, setScanMode] = useState<'sweep' | 'watch' | 'band_list'>('band_list')
   const [startFreq, setStartFreq] = useState('87.5')
@@ -181,10 +205,27 @@ export default function ScanDetectPage() {
             }
             setDetections(prev => [newDetection, ...prev].slice(0, 200))
 
-            // Update aircraft table from ADS-B detections
+            // Update aircraft table and trails from ADS-B detections
             if (data.protocol === 'adsb' && data.decoded_data?.aircraft_table) {
               const table = data.decoded_data.aircraft_table as Record<string, TrackedAircraft>
-              setAircraft(Object.values(table))
+              const acList = Object.values(table)
+              setAircraft(acList)
+
+              // Append new positions to trails
+              setTrails(prev => {
+                const next = { ...prev }
+                acList.forEach(ac => {
+                  if (ac.latitude != null && ac.longitude != null) {
+                    const existing = next[ac.icao_hex] || []
+                    const lastPos = existing[existing.length - 1]
+                    // Only add if position actually changed
+                    if (!lastPos || lastPos[0] !== ac.latitude || lastPos[1] !== ac.longitude) {
+                      next[ac.icao_hex] = [...existing, [ac.latitude!, ac.longitude!] as [number, number]].slice(-100)
+                    }
+                  }
+                })
+                return next
+              })
             }
           }
 
@@ -559,10 +600,13 @@ export default function ScanDetectPage() {
         ))}
       </div>
 
-      {/* Aircraft Tracking Table */}
+      {/* Aircraft Map & Tracking */}
       {aircraft.length > 0 && (
         <>
           <h2 className="text-xl font-semibold mb-4">Aircraft Tracking (ADS-B)</h2>
+          <div className="mb-6">
+            <AircraftMap aircraft={aircraft} trails={trails} height={450} />
+          </div>
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
