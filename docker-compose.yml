@@ -1,0 +1,19 @@
+services:
+  groundlink-dashboard:
+    build:
+      context: ./phase5_dashboard
+      dockerfile: Dockerfile
+    container_name: groundlink-dashboard
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: groundlink-tunnel
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run groundlink
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - groundlink-dashboard

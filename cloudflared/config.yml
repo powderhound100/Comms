@@ -1,0 +1,7 @@
+tunnel: d80880cb-2cd3-49b1-843e-b023e7bf80bc
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: groundlink.powderhound420.com
+    service: http://groundlink-dashboard:3001
+  - service: http_status:404
