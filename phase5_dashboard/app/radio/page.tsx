@@ -262,8 +262,9 @@ export default function RadioPage() {
       return
     }
 
-    // Start audio context
+    // Start audio context (resume needed for browser autoplay policy)
     const actx = new AudioContext({ sampleRate: 48000 })
+    actx.resume() // Explicit resume after user gesture
     const gain = actx.createGain()
     gain.gain.value = volume
     gain.connect(actx.destination)
@@ -271,73 +272,68 @@ export default function RadioPage() {
     gainNodeRef.current = gain
     setPlaying(true)
 
-    // Connect to SSE stream
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    const streamUrl = isLocal
-      ? `ws://localhost:8770?freq=${freq}&mode=${mode}`
-      : `/api/radio/stream?freq=${freq}&mode=${mode}`
-
-    if (isLocal) {
-      // Direct WebSocket for low-latency local audio
-      try {
-        const ws = new WebSocket(streamUrl)
-        ws.onopen = () => setConnected(true)
-        ws.onclose = () => setConnected(false)
-        ws.onerror = () => {
-          setConnected(false)
-          // Fall back to SSE
-          connectSSE()
-        }
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data)
-            handleAudioMessage(data)
-          } catch { /* skip */ }
-        }
-      } catch {
-        connectSSE()
-      }
-    } else {
-      connectSSE()
-    }
-
-    function connectSSE() {
-      const es = new EventSource(`/api/radio/stream?freq=${freq}&mode=${mode}`)
-      esRef.current = es
-      es.onopen = () => setConnected(true)
-      es.onerror = () => setConnected(false)
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          handleAudioMessage(data)
-        } catch { /* skip */ }
-      }
-    }
+    // Track next playback time for gapless scheduling
+    let nextPlayTime = 0
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function handleAudioMessage(data: any) {
-      if (data.type === 'audio' && data.samples && actx.state === 'running') {
-        // Decode base64 PCM float32 samples
+    function handleMessage(data: any) {
+      if (data.type === 'audio' && data.samples) {
+        if (actx.state === 'suspended') actx.resume()
+
+        // Decode base64 PCM float32
         const raw = atob(data.samples)
         const bytes = new Uint8Array(raw.length)
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
         const floats = new Float32Array(bytes.buffer)
 
-        const buffer = actx.createBuffer(1, floats.length, data.sample_rate || 48000)
+        const sampleRate = data.sample_rate || 48000
+        const buffer = actx.createBuffer(1, floats.length, sampleRate)
         buffer.getChannelData(0).set(floats)
         const source = actx.createBufferSource()
         source.buffer = buffer
         source.connect(gain)
-        source.start()
+
+        // Schedule gapless playback
+        const now = actx.currentTime
+        if (nextPlayTime < now) nextPlayTime = now
+        source.start(nextPlayTime)
+        nextPlayTime += buffer.duration
       }
 
       if (data.type === 'spectrum') {
         setPsdData(data.psd_dbfs)
-        // Estimate signal strength from peak
         if (data.psd_dbfs?.length) {
-          const peak = Math.max(...data.psd_dbfs)
-          setSignalStrength(peak)
+          setSignalStrength(Math.max(...data.psd_dbfs))
         }
+      }
+
+      if (data.type === 'connected') {
+        setConnected(true)
+      }
+    }
+
+    // Connect via WebSocket (localhost) or SSE (remote)
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
+
+    if (isLocal) {
+      const ws = new WebSocket(wsUrl)
+      ws.onopen = () => setConnected(true)
+      ws.onclose = () => setConnected(false)
+      ws.onerror = () => { /* will trigger onclose */ }
+      ws.onmessage = (event) => {
+        try { handleMessage(JSON.parse(event.data)) } catch { /* skip */ }
+      }
+      // Store for cleanup
+      const origClose = esRef.current
+      esRef.current = { close: () => ws.close() } as EventSource
+    } else {
+      const es = new EventSource(`/api/radio/stream?freq=${freq}&mode=${mode}`)
+      esRef.current = es
+      es.onopen = () => setConnected(true)
+      es.onerror = () => setConnected(false)
+      es.onmessage = (event) => {
+        try { handleMessage(JSON.parse(event.data)) } catch { /* skip */ }
       }
     }
   }, [playing, freq, mode, volume])

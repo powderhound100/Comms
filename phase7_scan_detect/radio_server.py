@@ -189,6 +189,7 @@ async def radio_handler(websocket, receiver: RadioReceiver):
         cmd_task = asyncio.create_task(read_commands())
 
         # Stream loop — capture, demod, send
+        frame_count = 0
         while True:
             if not receiver.sdr:
                 await asyncio.sleep(1)
@@ -196,8 +197,10 @@ async def radio_handler(websocket, receiver: RadioReceiver):
 
             try:
                 loop = asyncio.get_event_loop()
+
+                # Capture a larger block for smoother audio (~250ms)
                 iq = await loop.run_in_executor(
-                    None, receiver.sdr.read_samples, 131072  # ~55ms at 2.4 Msps
+                    None, receiver.sdr.read_samples, 524288  # ~218ms at 2.4 Msps
                 )
 
                 # Demod to audio
@@ -206,10 +209,7 @@ async def radio_handler(websocket, receiver: RadioReceiver):
                 # Encode audio as base64 float32
                 audio_b64 = base64.b64encode(audio.tobytes()).decode('ascii')
 
-                # Compute spectrum
-                psd = receiver.compute_psd(iq)
-
-                # Send audio
+                # Send audio chunk
                 await websocket.send(json.dumps({
                     "type": "audio",
                     "samples": audio_b64,
@@ -218,20 +218,22 @@ async def radio_handler(websocket, receiver: RadioReceiver):
                     "mode": receiver.mode,
                 }))
 
-                # Send spectrum (every other frame to save bandwidth)
-                await websocket.send(json.dumps({
-                    "type": "spectrum",
-                    "psd_dbfs": psd[::4],  # Decimate for transfer
-                    "center_freq_hz": receiver.freq_hz,
-                    "bandwidth_hz": receiver.sample_rate,
-                }))
+                # Send spectrum every 3rd frame to save bandwidth
+                frame_count += 1
+                if frame_count % 3 == 0:
+                    psd = receiver.compute_psd(iq)
+                    await websocket.send(json.dumps({
+                        "type": "spectrum",
+                        "psd_dbfs": psd[::4],
+                        "center_freq_hz": receiver.freq_hz,
+                        "bandwidth_hz": receiver.sample_rate,
+                    }))
 
             except Exception as e:
                 logger.warning("Stream error: %s", e)
                 await asyncio.sleep(0.5)
 
-            # Small yield for other tasks
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.005)  # Yield
 
     except Exception:
         pass

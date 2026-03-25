@@ -10,6 +10,7 @@ services:
     environment:
       - SCANNER_API_URL=http://host.docker.internal:8766
       - SCANNER_WS_URL=ws://host.docker.internal:8765
+      - RADIO_WS_URL=ws://host.docker.internal:8770
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
