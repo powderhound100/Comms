@@ -21,6 +21,7 @@ const navLinks = [
   { href: '/imagery', label: 'Imagery' },
   { href: '/signal-monitor', label: 'Signal Monitor' },
   { href: '/scan-detect', label: 'Scan & Detect' },
+  { href: '/radio', label: 'Radio' },
   { href: '/ads-b', label: 'ADS-B' },
   { href: '/references', label: 'References' },
 ]
