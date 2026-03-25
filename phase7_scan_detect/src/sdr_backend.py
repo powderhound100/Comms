@@ -30,39 +30,57 @@ class SDRDevice:
             logger.info("SDR mock mode — no hardware required")
             return
 
+        import os, sys, time
+        # Add RTL-SDR Blog driver DLL path on Windows
+        if sys.platform == "win32":
+            dll_dir = r"D:\tools\rtl-sdr\x64"
+            if os.path.isdir(dll_dir):
+                os.add_dll_directory(dll_dir)
+
         try:
-            import os, sys
-            # Add RTL-SDR Blog driver DLL path on Windows
-            if sys.platform == "win32":
-                dll_dir = r"D:\tools\rtl-sdr\x64"
-                if os.path.isdir(dll_dir):
-                    os.add_dll_directory(dll_dir)
             from rtlsdr import RtlSdr
-            self._device = RtlSdr(self.config.device_index)
-            self._device.sample_rate = self.config.sample_rate
-            if self.config.freq_correction_ppm != 0:
-                self._device.freq_correction = self.config.freq_correction_ppm
-            if self.config.gain == "auto":
-                self._device.gain = "auto"
-            else:
-                self._device.gain = float(self.config.gain)
-            logger.info(
-                "SDR opened: device=%d, rate=%d, gain=%s",
-                self.config.device_index,
-                self.config.sample_rate,
-                self.config.gain,
-            )
         except ImportError:
             raise RuntimeError(
                 "pyrtlsdr not installed. Install with: pip install pyrtlsdr\n"
                 "Or use --mock flag for development without hardware."
             )
-        except Exception as e:
-            raise RuntimeError(f"Failed to open SDR device: {e}")
+
+        # Close any existing device first
+        self.close()
+
+        # Retry opening — USB handle may be briefly held after a crash
+        last_err = None
+        for attempt in range(3):
+            try:
+                self._device = RtlSdr(self.config.device_index)
+                self._device.sample_rate = self.config.sample_rate
+                if self.config.freq_correction_ppm != 0:
+                    self._device.freq_correction = self.config.freq_correction_ppm
+                if self.config.gain == "auto":
+                    self._device.gain = "auto"
+                else:
+                    self._device.gain = float(self.config.gain)
+                logger.info(
+                    "SDR opened: device=%d, rate=%d, gain=%s",
+                    self.config.device_index,
+                    self.config.sample_rate,
+                    self.config.gain,
+                )
+                return
+            except Exception as e:
+                last_err = e
+                logger.warning("SDR open attempt %d failed: %s", attempt + 1, e)
+                self._device = None
+                time.sleep(2)
+
+        raise RuntimeError(f"Failed to open SDR device after 3 attempts: {last_err}")
 
     def close(self) -> None:
         if self._device is not None:
-            self._device.close()
+            try:
+                self._device.close()
+            except Exception:
+                pass
             self._device = None
             logger.info("SDR device closed")
 

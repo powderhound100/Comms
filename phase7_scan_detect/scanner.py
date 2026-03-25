@@ -149,6 +149,12 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
         if scanner.is_running:
             await scanner.stop()
 
+        # Reopen SDR (handles stale USB handles after stop/crash)
+        try:
+            scanner.sdr.open()
+        except Exception as e:
+            logging.warning("SDR reopen: %s", e)
+
         # Apply runtime config from request body
         try:
             body = await request.json()
@@ -298,9 +304,14 @@ def main(config_path, mock, mode, start_freq, stop_freq, watch_freq):
             )
         logging.info("=" * 60)
 
+        # Start scanning in background — HTTP API handles start/stop
+        asyncio.create_task(scanner.start())
+
+        # Keep the process alive — HTTP API controls the scanner
         try:
-            await scanner.start()
-        except KeyboardInterrupt:
+            while True:
+                await asyncio.sleep(1)
+        except (KeyboardInterrupt, asyncio.CancelledError):
             pass
         finally:
             await scanner.stop()
