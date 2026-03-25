@@ -107,6 +107,11 @@ class ProtocolDecoder:
         (1_694_100_000, 1_000_000, "goes_lrit"), # GOES LRIT
         (144_390_000, 15_000, "aprs"),           # APRS NA
         (152_480_000, 25_000, "pocsag"),         # POCSAG pager
+        (161_975_000, 15_000, "ais"),            # AIS channel 1
+        (162_025_000, 15_000, "ais"),            # AIS channel 2
+        (131_550_000, 25_000, "acars"),          # ACARS primary
+        (130_025_000, 25_000, "acars"),          # ACARS secondary
+        (129_125_000, 25_000, "acars"),          # ACARS tertiary
     ]
 
     def __init__(
@@ -180,6 +185,10 @@ class ProtocolDecoder:
                 return self._decode_aprs(iq_samples, sample_rate)
             elif protocol == "pocsag":
                 return self._decode_pocsag(iq_samples, sample_rate)
+            elif protocol == "ais":
+                return self._decode_ais(iq_samples, freq_hz, sample_rate, snr_db)
+            elif protocol == "acars":
+                return self._decode_acars(iq_samples, freq_hz, sample_rate, snr_db)
         except Exception as e:
             logger.warning("Protocol decode failed for %s: %s", protocol, e)
 
@@ -957,5 +966,99 @@ class ProtocolDecoder:
             fields={
                 "messages": messages,
                 "baud_rate": baud_rate,
+            },
+        )
+
+    # -------------------------------------------------------------------
+    # AIS Decoder (Automatic Identification System — ship tracking)
+    # -------------------------------------------------------------------
+
+    def _decode_ais(
+        self, iq: np.ndarray, freq_hz: float, sample_rate: int, snr_db: float
+    ) -> DecodedData | None:
+        """Decode AIS GMSK signals on 161.975 / 162.025 MHz.
+
+        AIS uses 9600 baud GMSK with HDLC framing (0x7E flags).
+        """
+        # FM demodulate
+        phase_diff = np.angle(iq[1:] * np.conj(iq[:-1]))
+
+        # Resample to ~9600 * 10 = 96000 sps for bit recovery
+        from scipy.signal import resample
+        target_rate = 96000
+        resampled = resample(phase_diff, int(len(phase_diff) * target_rate / sample_rate))
+
+        # Bit recovery at 9600 baud (10 samples per bit)
+        sps = 10
+        bits = (resampled[sps // 2::sps] > 0).astype(np.uint8)
+
+        if len(bits) < 48:
+            return None
+
+        # NRZI decode
+        nrzi_bits = np.zeros_like(bits)
+        nrzi_bits[0] = bits[0]
+        for i in range(1, len(bits)):
+            nrzi_bits[i] = 0 if bits[i] == bits[i - 1] else 1
+
+        # Look for HDLC flag 0x7E = 01111110
+        flag = [0, 1, 1, 1, 1, 1, 1, 0]
+        frames_found = 0
+        channel = "Ch1" if abs(freq_hz - 161_975_000) < 15_000 else "Ch2"
+
+        for i in range(len(nrzi_bits) - 8):
+            if list(nrzi_bits[i:i + 8]) == flag:
+                frames_found += 1
+
+        if frames_found < 2:
+            return None
+
+        return DecodedData(
+            protocol="ais",
+            summary=f"AIS {channel}: {frames_found} HDLC frames detected (SNR {snr_db:.1f} dB)",
+            fields={
+                "channel": channel,
+                "frequency_hz": freq_hz,
+                "frames_detected": frames_found,
+                "snr_db": snr_db,
+            },
+        )
+
+    # -------------------------------------------------------------------
+    # ACARS Decoder (Aircraft Communications Addressing and Reporting)
+    # -------------------------------------------------------------------
+
+    def _decode_acars(
+        self, iq: np.ndarray, freq_hz: float, sample_rate: int, snr_db: float
+    ) -> DecodedData | None:
+        """Detect ACARS AM-MSK signals on 131.55 / 130.025 / 129.125 MHz.
+
+        ACARS uses 2400 baud AM-MSK with a characteristic pre-key tone.
+        """
+        # AM demodulate (envelope detection)
+        envelope = np.abs(iq)
+
+        # Look for 2400 Hz pre-key tone characteristic of ACARS
+        from scipy.signal import welch
+        freqs, psd = welch(envelope, fs=sample_rate, nperseg=min(1024, len(envelope)))
+        psd_db = 10 * np.log10(psd + 1e-12)
+
+        # Find peak near 2400 Hz
+        tone_idx = np.argmin(np.abs(freqs - 2400))
+        tone_power = psd_db[tone_idx]
+        noise_floor = np.median(psd_db)
+        tone_snr = tone_power - noise_floor
+
+        if tone_snr < 6:
+            return None
+
+        freq_mhz = freq_hz / 1e6
+        return DecodedData(
+            protocol="acars",
+            summary=f"ACARS burst on {freq_mhz:.3f} MHz (tone SNR {tone_snr:.1f} dB)",
+            fields={
+                "frequency_hz": freq_hz,
+                "tone_snr_db": round(tone_snr, 1),
+                "signal_snr_db": round(snr_db, 1),
             },
         )

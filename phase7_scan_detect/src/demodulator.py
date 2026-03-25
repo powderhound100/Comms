@@ -103,23 +103,63 @@ class Demodulator:
         except Exception:
             return shifted
 
-    def _demod_fm(self, iq: np.ndarray, sample_rate: int) -> DemodResult:
-        """FM demodulation via instantaneous frequency."""
+    def _save_audio(self, audio: np.ndarray, freq_hz: float, label: str, rate: int = 48000) -> str | None:
+        """Save audio samples to WAV file. Returns path or None on failure."""
+        try:
+            ts = int(time.time())
+            freq_mhz = freq_hz / 1e6 if freq_hz else 0
+            filename = f"{label}_{freq_mhz:.3f}MHz_{ts}.wav"
+            path = self.audio_dir / filename
+            sf.write(str(path), audio, rate)
+            logger.info("Audio saved: %s (%.1fs)", filename, len(audio) / rate)
+            return str(path)
+        except Exception as e:
+            logger.warning("Audio save failed: %s", e)
+            return None
+
+    def _demod_fm(self, iq: np.ndarray, sample_rate: int, wideband: bool = True) -> DemodResult:
+        """FM demodulation via instantaneous frequency.
+
+        Args:
+            wideband: True for WBFM (broadcast), False for NFM (voice/public safety)
+        """
         # Instantaneous frequency = d(phase)/dt
         phase_diff = np.angle(iq[1:] * np.conj(iq[:-1]))
 
-        # Decimate to audio rate (~48 kHz)
-        audio_rate = 48000
+        # NFM needs tighter filtering — voice is 3 kHz, deviation ±5 kHz
+        if not wideband:
+            # Low-pass at 5 kHz for narrowband voice
+            nyq = sample_rate / 2
+            cutoff = min(5000 / nyq, 0.99)
+            try:
+                b, a = sp_signal.butter(4, cutoff, btype="low")
+                phase_diff = sp_signal.lfilter(b, a, phase_diff)
+            except Exception:
+                pass
+
+        # Decimate to audio rate
+        audio_rate = 48000 if wideband else 16000
         decim = max(1, sample_rate // audio_rate)
         audio = sp_signal.decimate(phase_diff, decim, zero_phase=True)
+
+        # De-emphasis filter (75μs for NA FM broadcast, 50μs for NFM)
+        tau = 75e-6 if wideband else 50e-6
+        alpha = 1.0 - np.exp(-1.0 / (audio_rate * tau))
+        deemph = np.zeros_like(audio)
+        deemph[0] = audio[0]
+        for i in range(1, len(audio)):
+            deemph[i] = deemph[i - 1] + alpha * (audio[i] - deemph[i - 1])
+        audio = deemph
 
         # Normalize
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio)) * 0.9
 
+        label = "WBFM" if wideband else "NFM"
+        duration = len(audio) / audio_rate
         return DemodResult(
             demod_type="audio",
-            preview=f"FM audio: {len(audio)} samples @ {audio_rate} Hz",
+            preview=f"{label} audio: {duration:.1f}s @ {audio_rate} Hz",
             samples=audio.astype(np.float32),
         )
 
@@ -131,8 +171,16 @@ class Demodulator:
         # Remove DC
         envelope = envelope - np.mean(envelope)
 
+        # Bandpass for voice (300 Hz - 3.4 kHz)
+        nyq = sample_rate / 2
+        try:
+            b, a = sp_signal.butter(4, [300 / nyq, min(3400 / nyq, 0.99)], btype="band")
+            envelope = sp_signal.lfilter(b, a, envelope)
+        except Exception:
+            pass
+
         # Decimate to audio rate
-        audio_rate = 48000
+        audio_rate = 16000
         decim = max(1, sample_rate // audio_rate)
         audio = sp_signal.decimate(envelope, decim, zero_phase=True)
 
@@ -140,9 +188,10 @@ class Demodulator:
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio)) * 0.9
 
+        duration = len(audio) / audio_rate
         return DemodResult(
             demod_type="audio",
-            preview=f"AM audio: {len(audio)} samples @ {audio_rate} Hz",
+            preview=f"AM audio: {duration:.1f}s @ {audio_rate} Hz",
             samples=audio.astype(np.float32),
         )
 

@@ -192,14 +192,30 @@ class SpectrumScanner:
                             iq, offset, det.bandwidth_hz, sample_rate, det.snr_db
                         )
 
-                    # Demod
+                    # Demod — also try NFM for narrowband voice signals
                     demod_result = None
                     mod_type = classification.modulation if classification else None
-                    if self.config.demod_enabled and self.demodulator and mod_type:
-                        offset = det.center_freq_hz - freq
-                        demod_result = self.demodulator.try_demod(
-                            iq, offset, det.bandwidth_hz, sample_rate, mod_type
-                        )
+                    if self.config.demod_enabled and self.demodulator:
+                        # Use known signal modulation hint if classifier didn't match
+                        known_pre = match_signal(det.center_freq_hz, mod_type)
+                        demod_mod = mod_type
+                        if known_pre and known_pre.modulation and not mod_type:
+                            demod_mod = known_pre.modulation
+                        # Default to NFM for narrowband signals in voice bands
+                        if not demod_mod and det.bandwidth_hz < 20000:
+                            demod_mod = "NFM"
+                        if demod_mod:
+                            offset = det.center_freq_hz - freq
+                            demod_result = self.demodulator.try_demod(
+                                iq, offset, det.bandwidth_hz, sample_rate, demod_mod
+                            )
+                            # Save audio if demod produced voice samples
+                            if demod_result and demod_result.demod_type == "audio" and demod_result.samples is not None:
+                                audio_rate = 48000 if demod_mod == "WBFM" else 16000
+                                demod_result.audio_path = self.demodulator._save_audio(
+                                    demod_result.samples, det.center_freq_hz,
+                                    demod_mod, audio_rate,
+                                )
 
                     # Match known signal
                     known = match_signal(det.center_freq_hz, mod_type)

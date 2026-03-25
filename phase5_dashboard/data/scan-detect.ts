@@ -72,14 +72,27 @@ export const scanPipelineChain: SignalChain = {
 }
 
 export const defaultScanBands = [
+  // Voice & Broadcast
   { name: 'FM Broadcast', startMhz: 87.5, stopMhz: 108, description: 'Commercial FM radio stations' },
-  { name: 'VHF Aviation', startMhz: 118, stopMhz: 137, description: 'Aviation voice & navigation' },
-  { name: 'NOAA Weather', startMhz: 162, stopMhz: 163, description: 'NOAA Weather Radio (NWR)' },
-  { name: '2m Amateur', startMhz: 144, stopMhz: 148, description: 'VHF amateur radio band' },
-  { name: 'NOAA/Meteor Sat', startMhz: 137, stopMhz: 138, description: 'Weather satellite APT/LRPT' },
+  { name: 'VHF Aviation', startMhz: 118, stopMhz: 137, description: 'Aviation voice (AM) & ACARS' },
+  { name: 'NOAA Weather', startMhz: 162, stopMhz: 163, description: 'NOAA Weather Radio + EAS alerts' },
+  { name: '2m Amateur', startMhz: 144, stopMhz: 148, description: 'VHF amateur radio / APRS' },
+
+  // Emergency & Public Safety
+  { name: 'Public Safety VHF', startMhz: 150, stopMhz: 162, description: 'State patrol, MURS, pagers' },
+  { name: 'Public Safety UHF', startMhz: 460, stopMhz: 470, description: 'Police, fire, EMS dispatch (NFM)' },
+  { name: 'Marine VHF', startMhz: 156, stopMhz: 162.5, description: 'Marine Ch16 + AIS ship tracking' },
+  { name: 'P25 Trunking', startMhz: 851, stopMhz: 869, description: 'P25 digital public safety trunked' },
+
+  // Aircraft & Satellite
   { name: 'ADS-B', startMhz: 1088, stopMhz: 1092, description: 'Aircraft transponder (1090 MHz)' },
+  { name: 'NOAA/Meteor Sat', startMhz: 137, stopMhz: 138, description: 'Weather satellite APT/LRPT' },
   { name: 'GOES LRIT', startMhz: 1693, stopMhz: 1695, description: 'GOES-16/18 LRIT downlink' },
+
+  // ISM & Other
   { name: 'ISM 433', startMhz: 433, stopMhz: 434, description: 'ISM band — remotes, sensors, LoRa' },
+  { name: 'FRS/GMRS', startMhz: 462, stopMhz: 467.7, description: 'Family Radio / GMRS walkie-talkies' },
+  { name: 'Railroad', startMhz: 160, stopMhz: 162, description: 'AAR railroad operations' },
 ]
 
 // Demo detections for initial render before scanner is connected
