@@ -6,6 +6,8 @@ const typeColors: Record<string, string> = {
   ccsds: 'bg-emerald-900/60 border-emerald-700 text-emerald-300',
   app: 'bg-amber-900/60 border-amber-700 text-amber-300',
   attenuator: 'bg-red-900/60 border-red-700 text-red-300',
+  decode: 'bg-cyan-900/60 border-cyan-700 text-cyan-300',
+  ml: 'bg-fuchsia-900/60 border-fuchsia-700 text-fuchsia-300',
 }
 
 export default function SignalFlowDiagram({ chain }: { chain: SignalChain }) {

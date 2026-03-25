@@ -18,7 +18,7 @@ export interface OOTBlock {
 
 export interface SignalFlowBlock {
   label: string
-  type: 'hardware' | 'dsp' | 'ccsds' | 'app' | 'attenuator'
+  type: 'hardware' | 'dsp' | 'ccsds' | 'app' | 'attenuator' | 'decode' | 'ml'
 }
 
 export interface SignalChain {
