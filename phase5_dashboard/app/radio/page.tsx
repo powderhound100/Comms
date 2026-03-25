@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+import { radioChains, spectrumChain, radioModes, audioTransport, dspConcepts } from '@/data/radio'
 
 // ──────────────────────────────────────────────────────────────
 // Preset stations — Seattle area
@@ -651,6 +653,127 @@ export default function RadioPage() {
             </div>
           )
         })}
+      </div>
+
+      {/* ── How It Works ── */}
+      <div className="border-t border-gray-800 pt-8 mt-8">
+        <h2 className="text-2xl font-bold mb-2">How It Works</h2>
+        <p className="text-gray-400 mb-8">
+          The SDR receiver chain — from antenna to speaker — explained step by step.
+        </p>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div className="text-sm text-gray-500">Demodulation Modes</div>
+            <div className="text-2xl font-bold text-sky-400">3</div>
+            <div className="text-sm text-gray-500">WFM, NFM, AM</div>
+          </div>
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div className="text-sm text-gray-500">Sample Rate</div>
+            <div className="text-2xl font-bold text-sky-400">2.4 Msps</div>
+            <div className="text-sm text-gray-500">RTL-SDR IQ capture</div>
+          </div>
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <div className="text-sm text-gray-500">Frequency Range</div>
+            <div className="text-2xl font-bold text-sky-400">24–1766 MHz</div>
+            <div className="text-sm text-gray-500">RTL2832U + R820T2</div>
+          </div>
+        </div>
+
+        {/* What is SDR? */}
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8">
+          <h3 className="text-lg font-semibold mb-2">What is Software-Defined Radio?</h3>
+          <p className="text-sm text-gray-400">
+            A software-defined radio replaces traditional analog filter and demodulator hardware
+            with digital signal processing in software. The RTL-SDR digitises a slice of RF
+            spectrum as IQ (in-phase / quadrature) samples at 2.4 Msps. A Python backend performs
+            demodulation — phase differentiation for FM, envelope detection for AM — then decimates
+            and streams the resulting audio over a binary WebSocket to the browser, where an
+            AudioWorklet ring buffer plays it back with gapless scheduling.
+          </p>
+        </div>
+
+        {/* Dynamic block diagram */}
+        <h2 className="text-xl font-semibold mb-4">
+          {modeLabel(mode)} Signal Chain
+        </h2>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8">
+          <SignalFlowDiagram chain={radioChains[mode]} />
+        </div>
+
+        {/* Spectrum pipeline */}
+        <h2 className="text-xl font-semibold mb-4">Spectrum Pipeline</h2>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8">
+          <SignalFlowDiagram chain={spectrumChain} />
+        </div>
+
+        {/* Mode comparison table */}
+        <h2 className="text-xl font-semibold mb-4">Mode Comparison</h2>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-700 text-left text-gray-400">
+                <th className="py-2 pr-4"></th>
+                {radioModes.map(m => (
+                  <th key={m.key} className="py-2 pr-4">
+                    <span className={`inline-flex items-center gap-1.5 font-mono ${mode === m.key ? 'text-sky-400' : ''}`}>
+                      {m.label}
+                      {mode === m.key && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-900/50 border-sky-700 text-sky-300 font-sans">
+                          active
+                        </span>
+                      )}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(['demod', 'filter', 'outputRate', 'deEmphasis', 'typicalUse'] as const).map(field => (
+                <tr key={field} className="border-b border-gray-800/50">
+                  <td className="py-1.5 pr-4 text-gray-400 w-36 capitalize">
+                    {field === 'demod' ? 'Demod Method' :
+                     field === 'outputRate' ? 'Output Rate' :
+                     field === 'deEmphasis' ? 'De-emphasis' :
+                     field === 'typicalUse' ? 'Typical Use' : 'Filter'}
+                  </td>
+                  {radioModes.map(m => (
+                    <td key={m.key} className={`py-1.5 pr-4 ${mode === m.key ? 'text-gray-200' : 'text-gray-500'}`}>
+                      {m[field]}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Audio transport table */}
+        <h2 className="text-xl font-semibold mb-4">Audio Transport</h2>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 mb-8">
+          <table className="w-full text-sm">
+            <tbody>
+              {audioTransport.map(row => (
+                <tr key={row.label} className="border-b border-gray-800/50">
+                  <td className="py-1.5 text-gray-400 w-48">{row.label}</td>
+                  <td className="py-1.5 font-mono">{row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* DSP concepts glossary */}
+        <h2 className="text-xl font-semibold mb-4">DSP Concepts</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          {dspConcepts.map(concept => (
+            <div key={concept.term} className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+              <h3 className="font-semibold mb-1">{concept.term}</h3>
+              <p className="text-sm text-gray-400">{concept.description}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
