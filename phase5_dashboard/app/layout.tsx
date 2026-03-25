@@ -20,6 +20,7 @@ const navLinks = [
   { href: '/signal-recognition', label: 'Signal Recognition' },
   { href: '/imagery', label: 'Imagery' },
   { href: '/signal-monitor', label: 'Signal Monitor' },
+  { href: '/scan-detect', label: 'Scan & Detect' },
   { href: '/ads-b', label: 'ADS-B' },
   { href: '/references', label: 'References' },
 ]
