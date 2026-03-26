@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
 
     /* AM: running DC removal and AGC state (persist across blocks) */
     float am_dc = 0.0f;        /* IIR DC estimator */
-    float agc_peak = 0.5f;     /* slow AGC envelope (start mid-range to avoid initial transient) */
+    float agc_peak = (mode == MODE_WFM) ? 0.5f : 0.01f;  /* WFM: mid-range avoids initial transient; AM/NFM: low start for weak signals */
 
     /* Squelch state (AM/NFM) */
     float noise_floor = 0.05f; /* IIR noise floor estimator */
