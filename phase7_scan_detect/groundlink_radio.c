@@ -184,9 +184,12 @@ static void make_lowpass_fir(float *h, int taps, float cutoff) {
 static int decimate_iq(const float *in_i, const float *in_q, int n_in,
                        float *out_i, float *out_q,
                        const float *fir, int fir_len, int factor,
-                       const float *hist_i, const float *hist_q) {
+                       const float *hist_i, const float *hist_q,
+                       int *phase) {
     int n_out = 0;
-    for (int i = 0; i < n_in; i += factor) {
+    int start = phase ? *phase : 0;
+    int i = start;
+    for (; i < n_in; i += factor) {
         float si = 0.0f, sq = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
@@ -206,6 +209,8 @@ static int decimate_iq(const float *in_i, const float *in_q, int n_in,
         out_q[n_out] = sq;
         n_out++;
     }
+    /* Save phase: how far past n_in the next sample would fall */
+    if (phase) *phase = i - n_in;
     return n_out;
 }
 
@@ -214,9 +219,12 @@ static int decimate_iq(const float *in_i, const float *in_q, int n_in,
 static int decimate_real(const float *in, int n_in,
                          float *out,
                          const float *fir, int fir_len, int factor,
-                         const float *hist) {
+                         const float *hist,
+                         int *phase) {
     int n_out = 0;
-    for (int i = 0; i < n_in; i += factor) {
+    int start = phase ? *phase : 0;
+    int i = start;
+    for (; i < n_in; i += factor) {
         float s = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
@@ -231,6 +239,7 @@ static int decimate_real(const float *in, int n_in,
         }
         out[n_out++] = s;
     }
+    if (phase) *phase = i - n_in;
     return n_out;
 }
 
@@ -408,6 +417,10 @@ int main(int argc, char **argv) {
     float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* raw IQ */
     float hist_audio[FIR_TAPS] = {0};                              /* audio */
 
+    /* Decimation phase — carry remainder across blocks for uniform sample spacing */
+    int iq_dec_phase = 0;
+    int audio_dec_phase = 0;
+
     int frame_count = 0;
 
     /* ── Main loop ── */
@@ -445,7 +458,8 @@ int main(int argc, char **argv) {
             int n_dec = decimate_iq(iq_i, iq_q, n_iq,
                                     dec1_i, dec1_q,
                                     fir_10, FIR_TAPS, 10,
-                                    hist_iq_i, hist_iq_q);
+                                    hist_iq_i, hist_iq_q,
+                                    &iq_dec_phase);
 
             /* Save IQ history for next block */
             if (n_iq >= FIR_TAPS) {
@@ -466,7 +480,8 @@ int main(int argc, char **argv) {
             n_audio = decimate_real(audio, n_dec,
                                     audio_dec,
                                     fir_audio5, FIR_TAPS, 5,
-                                    hist_audio);
+                                    hist_audio,
+                                    &audio_dec_phase);
             audio_rate = 48000;
 
             /* Save audio history */
@@ -486,7 +501,8 @@ int main(int argc, char **argv) {
             int n1 = decimate_iq(iq_i, iq_q, n_iq,
                                  dec1_i, dec1_q,
                                  fir_5, FIR_TAPS, 5,
-                                 hist_iq_i, hist_iq_q);
+                                 hist_iq_i, hist_iq_q,
+                                 &iq_dec_phase);
 
             /* Save IQ history (from raw input) */
             if (n_iq >= FIR_TAPS) {
@@ -497,11 +513,11 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL);
+                                 NULL, NULL, NULL);
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL);
+                                 NULL, NULL, NULL);
 
             /* FM demod on 48k IQ */
             for (int i = 0; i < n3; i++) {
@@ -516,7 +532,8 @@ int main(int argc, char **argv) {
             n_audio = decimate_real(audio, n3,
                                     audio_dec,
                                     fir_audio3, FIR_TAPS, 3,
-                                    hist_audio);
+                                    hist_audio,
+                                    &audio_dec_phase);
             audio_rate = 16000;
 
             if (n3 >= FIR_TAPS) {
@@ -535,7 +552,8 @@ int main(int argc, char **argv) {
             int n1 = decimate_iq(iq_i, iq_q, n_iq,
                                  dec1_i, dec1_q,
                                  fir_5, FIR_TAPS, 5,
-                                 hist_iq_i, hist_iq_q);
+                                 hist_iq_i, hist_iq_q,
+                                 &iq_dec_phase);
 
             if (n_iq >= FIR_TAPS) {
                 memcpy(hist_iq_i, iq_i + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
@@ -545,11 +563,11 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL);
+                                 NULL, NULL, NULL);
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL);
+                                 NULL, NULL, NULL);
 
             /* AM envelope detection with IIR DC removal (no block boundary clicks) */
             float dc_alpha = 1.0f - expf(-2.0f * PI_F * 20.0f / 48000.0f);
@@ -563,7 +581,8 @@ int main(int argc, char **argv) {
             n_audio = decimate_real(audio, n3,
                                     audio_dec,
                                     fir_audio3, FIR_TAPS, 3,
-                                    hist_audio);
+                                    hist_audio,
+                                    &audio_dec_phase);
             audio_rate = 16000;
 
             if (n3 >= FIR_TAPS) {
