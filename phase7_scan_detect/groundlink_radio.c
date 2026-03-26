@@ -154,9 +154,9 @@ static void compute_spectrum(const float *iq_i, const float *iq_q,
     }
 }
 
-/* ── FIR low-pass filter coefficients (16-tap, normalized sinc) ── */
+/* ── FIR low-pass filter coefficients (32-tap, normalized sinc) ── */
 
-#define FIR_TAPS 16
+#define FIR_TAPS 32
 
 static void make_lowpass_fir(float *h, int taps, float cutoff) {
     /* cutoff: fraction of sample rate (0..0.5) */
@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
 
     /* AM: running DC removal and AGC state (persist across blocks) */
     float am_dc = 0.0f;        /* IIR DC estimator */
-    float agc_peak = 0.01f;    /* slow AGC envelope */
+    float agc_peak = 0.5f;     /* slow AGC envelope (start mid-range to avoid initial transient) */
 
     /* Squelch state (AM/NFM) */
     float noise_floor = 0.05f; /* IIR noise floor estimator */
@@ -579,8 +579,20 @@ int main(int argc, char **argv) {
         }
 
         float scale;
-        if (mode == MODE_AM || mode == MODE_NFM) {
-            /* Slow AGC for AM/NFM: fast attack, slow release */
+        if (mode == MODE_WFM) {
+            /* WFM: slow AGC — no per-block peak normalization.
+             * FM broadcast has pre-processed audio, so levels are stable.
+             * Slow attack avoids reacting to every syllable; very slow release
+             * holds gain during brief quiet passages (like a real FM receiver). */
+            if (block_peak > agc_peak) {
+                agc_peak += 0.1f * (block_peak - agc_peak);    /* attack: ~10 blocks (~1s) */
+            } else {
+                agc_peak += 0.002f * (block_peak - agc_peak);  /* release: ~500 blocks (~55s) */
+            }
+            scale = (agc_peak > 1e-6f) ? (0.8f * 32767.0f / agc_peak) : 32767.0f;
+            squelch_gate = 1.0f;
+        } else {
+            /* AM/NFM: faster AGC + squelch */
             if (block_peak > agc_peak) {
                 agc_peak += 0.3f * (block_peak - agc_peak);
             } else {
@@ -589,28 +601,19 @@ int main(int argc, char **argv) {
             scale = (agc_peak > 1e-6f) ? (0.6f * 32767.0f / agc_peak) : 32767.0f;
 
             /* ── Squelch: mute when signal is near noise floor ── */
-            /* Track noise floor: very slow IIR that follows minimum levels */
             if (block_peak < noise_floor) {
                 noise_floor += 0.1f * (block_peak - noise_floor);   /* drop fast */
             } else {
                 noise_floor += 0.001f * (block_peak - noise_floor); /* rise very slow */
             }
 
-            /* Signal is "open" when block_peak > 3x noise floor */
             float squelch_ratio = (noise_floor > 1e-8f) ? (block_peak / noise_floor) : 1.0f;
             if (squelch_ratio > 3.0f) {
-                /* Open squelch — fast open */
                 squelch_gate += 0.4f * (1.0f - squelch_gate);
             } else {
-                /* Close squelch — smooth fade out */
                 squelch_gate *= 0.85f;
             }
             if (squelch_gate < 0.01f) squelch_gate = 0.0f;
-
-        } else {
-            /* WFM: per-block normalize, no squelch (continuous signal) */
-            scale = (block_peak > 1e-6f) ? (0.9f * 32767.0f / block_peak) : 32767.0f;
-            squelch_gate = 1.0f;
         }
 
         for (int i = 0; i < n_audio; i++) {
