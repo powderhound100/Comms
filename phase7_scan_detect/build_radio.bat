@@ -22,6 +22,14 @@ if %ERRORLEVEL% EQU 0 (
     echo   rtlsdr.dll, pthreadVC2.dll, msvcr100.dll
     echo.
     echo Usage: groundlink_radio.exe --freq 94900000 --mode wfm --gain 400
+    echo.
+    if exist dsd-fme.exe (
+        echo DSD-FME found: P25 decoding available
+    ) else (
+        echo WARNING: dsd-fme.exe not found - P25 decoding unavailable
+        echo   Download from https://github.com/lwvmobile/dsd-fme/releases
+        echo   or build from source and place dsd-fme.exe in this directory.
+    )
 ) else (
     echo.
     echo Build FAILED.

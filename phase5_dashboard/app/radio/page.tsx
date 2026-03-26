@@ -14,7 +14,7 @@ import { useSdr } from '@/hooks/use-sdr'
 interface Preset {
   label: string
   freq: number // Hz
-  mode: 'wfm' | 'nfm' | 'am'
+  mode: 'wfm' | 'nfm' | 'am' | 'p25'
   sub?: string
   digital?: boolean
 }
@@ -80,11 +80,11 @@ const PRESET_GROUPS: PresetGroup[] = [
     name: 'P25 Digital (KCERS)',
     color: 'orange',
     presets: [
-      { label: 'KCERS Control', freq: 851.0125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
-      { label: 'SPD Trunked', freq: 851.0625e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
-      { label: 'SFD Trunked', freq: 851.3125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
-      { label: 'KCSO Trunked', freq: 851.5125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
-      { label: 'EMS Trunked', freq: 852.0125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
+      { label: 'KCERS Control', freq: 851.0125e6, mode: 'p25', sub: 'Control channel', digital: true },
+      { label: 'SPD Trunked', freq: 851.0625e6, mode: 'p25', sub: 'Seattle Police', digital: true },
+      { label: 'SFD Trunked', freq: 851.3125e6, mode: 'p25', sub: 'Seattle Fire', digital: true },
+      { label: 'KCSO Trunked', freq: 851.5125e6, mode: 'p25', sub: 'King Co Sheriff', digital: true },
+      { label: 'EMS Trunked', freq: 852.0125e6, mode: 'p25', sub: 'Emergency Medical', digital: true },
     ],
   },
   {
@@ -118,7 +118,7 @@ function formatFreq(hz: number): string {
 }
 
 function modeLabel(m: string) {
-  return m === 'wfm' ? 'WFM' : m === 'nfm' ? 'NFM' : 'AM'
+  return m === 'wfm' ? 'WFM' : m === 'nfm' ? 'NFM' : m === 'p25' ? 'P25' : 'AM'
 }
 
 const colorMap: Record<string, { bg: string; text: string; border: string; ring: string; dot: string }> = {
@@ -237,7 +237,7 @@ export default function RadioPage() {
   const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('radio')
 
   const [freq, setFreq] = useState(94.9e6)
-  const [mode, setMode] = useState<'wfm' | 'nfm' | 'am'>('wfm')
+  const [mode, setMode] = useState<'wfm' | 'nfm' | 'am' | 'p25'>('wfm')
   const [volume, setVolume] = useState(0.7)
   const [playing, setPlaying] = useState(false)
   const [connected, setConnected] = useState(false)
@@ -263,7 +263,7 @@ export default function RadioPage() {
 
 
   // Tune to a frequency
-  const tune = useCallback(async (newFreq: number, newMode: 'wfm' | 'nfm' | 'am', presetName?: string) => {
+  const tune = useCallback(async (newFreq: number, newMode: 'wfm' | 'nfm' | 'am' | 'p25', presetName?: string) => {
     setFreq(newFreq)
     setMode(newMode)
     setFreqInput((newFreq / 1e6).toFixed(3))
@@ -495,14 +495,22 @@ export default function RadioPage() {
             </div>
           )}
 
-          {/* P25 digital signal warning */}
-          {isDigitalFreq && playing && (
+          {/* P25 digital signal banner */}
+          {mode === 'p25' && playing && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2">
+              <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse shrink-0" />
+              <span className="text-xs text-orange-400">
+                P25 Digital — DSD-FME decoding active
+              </span>
+            </div>
+          )}
+          {isDigitalFreq && mode !== 'p25' && playing && (
             <div className="mt-3 flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2">
               <svg className="w-4 h-4 text-orange-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
               </svg>
               <span className="text-xs text-orange-400">
-                P25 Digital Signal — spectrum visible but audio requires P25 vocoder
+                P25 Digital Signal — switch to P25 mode for decoded audio
               </span>
             </div>
           )}
@@ -534,7 +542,7 @@ export default function RadioPage() {
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-gray-600 mb-1">Modulation</label>
             <div className="flex">
-              {(['wfm', 'nfm', 'am'] as const).map(m => (
+              {(['wfm', 'nfm', 'am', 'p25'] as const).map(m => (
                 <button
                   key={m}
                   onClick={() => { setMode(m); tune(freq, m, activePreset ?? undefined) }}
@@ -542,7 +550,7 @@ export default function RadioPage() {
                     mode === m
                       ? 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-400'
                       : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200'
-                  } ${m === 'wfm' ? 'rounded-l' : m === 'am' ? 'rounded-r' : ''} ${m !== 'wfm' ? 'border-l-0' : ''}`}
+                  } ${m === 'wfm' ? 'rounded-l' : m === 'p25' ? 'rounded-r' : ''} ${m !== 'wfm' ? 'border-l-0' : ''}`}
                 >
                   {modeLabel(m)}
                 </button>
@@ -716,8 +724,8 @@ export default function RadioPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
             <div className="text-sm text-gray-500">Demodulation Modes</div>
-            <div className="text-2xl font-bold text-sky-400">3</div>
-            <div className="text-sm text-gray-500">WFM, NFM, AM</div>
+            <div className="text-2xl font-bold text-sky-400">4</div>
+            <div className="text-sm text-gray-500">WFM, NFM, AM, P25</div>
           </div>
           <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
             <div className="text-sm text-gray-500">Sample Rate</div>

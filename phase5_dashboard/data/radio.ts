@@ -54,6 +54,22 @@ export const radioChains: Record<string, SignalChain> = {
       { label: 'AudioWorklet', type: 'app' },
     ],
   },
+  p25: {
+    name: 'P25 Digital Reception',
+    description: 'P25 decoding — FM discriminator piped to DSD-FME vocoder, decoded voice upsampled to 48 kHz.',
+    phase: 7,
+    planned: false,
+    blocks: [
+      { label: 'Antenna', type: 'hardware' },
+      { label: 'RTL-SDR', type: 'hardware' },
+      { label: 'FIR + Decimate ×50 IQ', type: 'dsp' },
+      { label: 'Fast atan2 FM Disc', type: 'dsp' },
+      { label: 'DSD-FME P25 Decode', type: 'decode' },
+      { label: '8k → 48k Upsample', type: 'dsp' },
+      { label: 'JSON WebSocket', type: 'app' },
+      { label: 'AudioWorklet', type: 'app' },
+    ],
+  },
 }
 
 // ── Spectrum analysis pipeline ──
@@ -113,6 +129,15 @@ export const radioModes: RadioMode[] = [
     outputRate: '16 kHz',
     deEmphasis: 'None',
     typicalUse: 'Aviation, shortwave, AM broadcast',
+  },
+  {
+    key: 'p25',
+    label: 'P25',
+    demod: 'DSD-FME (subprocess)',
+    filter: 'FIR LPF → ×50 IQ decim + FM disc',
+    outputRate: '8 kHz → 48 kHz',
+    deEmphasis: 'None (digital)',
+    typicalUse: 'Public safety trunked (KCERS)',
   },
 ]
 

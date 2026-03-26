@@ -14,7 +14,7 @@ export type SdrMode = 'radio' | 'scanner' | 'adsb'
 export interface RadioConfig {
   port?: number
   freq?: number       // MHz, e.g. 94.9
-  mode?: 'wfm' | 'nfm' | 'am'
+  mode?: 'wfm' | 'nfm' | 'am' | 'p25'
 }
 
 export interface ScannerConfig {

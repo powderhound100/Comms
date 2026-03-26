@@ -40,7 +40,7 @@
 
 /* ── Modes ─────────────────────────────────────────────────────── */
 
-enum demod_mode { MODE_WFM, MODE_NFM, MODE_AM };
+enum demod_mode { MODE_WFM, MODE_NFM, MODE_AM, MODE_DISC };
 
 /* ── Globals ───────────────────────────────────────────────────── */
 
@@ -296,6 +296,7 @@ static int parse_args(int argc, char **argv,
             if (strcmp(argv[i], "wfm") == 0) *mode = MODE_WFM;
             else if (strcmp(argv[i], "nfm") == 0) *mode = MODE_NFM;
             else if (strcmp(argv[i], "am") == 0) *mode = MODE_AM;
+            else if (strcmp(argv[i], "disc") == 0) *mode = MODE_DISC;
             else {
                 fprintf(stderr, "Unknown mode: %s\n", argv[i]);
                 return -1;
@@ -309,7 +310,7 @@ static int parse_args(int argc, char **argv,
                 "groundlink_radio — C SDR demodulator + spectrum tool\n\n"
                 "Usage: groundlink_radio [options]\n"
                 "  --freq HZ     Center frequency (default: 94900000)\n"
-                "  --mode MODE   wfm, nfm, am (default: wfm)\n"
+                "  --mode MODE   wfm, nfm, am, disc (default: wfm)\n"
                 "  --gain TENTH  Gain in tenths of dB (default: 400 = 40.0 dB)\n"
                 "  --rate HZ     Sample rate (default: 2400000)\n");
             return -1;
@@ -371,7 +372,8 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "SDR configured: freq=%u Hz, rate=%u, gain=%.1f dB, mode=%s\n",
             freq, rate, gain / 10.0f,
-            mode == MODE_WFM ? "WFM" : mode == MODE_NFM ? "NFM" : "AM");
+            mode == MODE_WFM ? "WFM" : mode == MODE_NFM ? "NFM" :
+            mode == MODE_AM ? "AM" : "DISC");
 
     /* ── Allocate buffers ── */
     uint8_t *raw_buf = (uint8_t *)malloc(CAPTURE_BYTES);
@@ -544,6 +546,44 @@ int main(int argc, char **argv) {
             float alpha = 1.0f - expf(-1.0f / (16000.0f * 50e-6f));
             deemphasis(audio_dec, n_audio, alpha, &deemph_state);
 
+        } else if (mode == MODE_DISC) {
+            /*
+             * DISC: 2.4M → /5 → 480k → /5 → 96k → /2 → 48k IQ,
+             *       then FM discriminator at 48k — NO audio decimation,
+             *       NO de-emphasis (digital symbols need raw output)
+             */
+            int n1 = decimate_iq(iq_i, iq_q, n_iq,
+                                 dec1_i, dec1_q,
+                                 fir_5, FIR_TAPS, 5,
+                                 hist_iq_i, hist_iq_q,
+                                 &iq_dec_phase);
+
+            if (n_iq >= FIR_TAPS) {
+                memcpy(hist_iq_i, iq_i + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq_q, iq_q + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
+            int n2 = decimate_iq(dec1_i, dec1_q, n1,
+                                 dec2_i, dec2_q,
+                                 fir_5, FIR_TAPS, 5,
+                                 NULL, NULL, NULL);
+            int n3 = decimate_iq(dec2_i, dec2_q, n2,
+                                 dec1_i, dec1_q,
+                                 fir_2, FIR_TAPS, 2,
+                                 NULL, NULL, NULL);
+
+            /* FM discriminator on 48k IQ — output stays at 48k */
+            for (int i = 0; i < n3; i++) {
+                float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
+                float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
+                audio_dec[i] = fast_atan2f(cj, cr);
+                prev_i = dec1_i[i];
+                prev_q = dec1_q[i];
+            }
+
+            n_audio = n3;
+            audio_rate = 48000;
+
         } else {  /* MODE_AM */
             /*
              * AM: 2.4M → /5 → 480k → /5 → 96k → /2 → 48k IQ,
@@ -591,6 +631,16 @@ int main(int argc, char **argv) {
         }
 
         /* ── Normalize + convert to int16 PCM ── */
+        if (mode == MODE_DISC) {
+            /* DISC: fixed-gain scaling, no AGC/squelch.
+             * fast_atan2f output is [-PI, PI], scale to ~80% of int16 range. */
+            float disc_scale = 0.8f * 32767.0f / PI_F;
+            for (int i = 0; i < n_audio; i++) {
+                float s = audio_dec[i] * disc_scale;
+                pcm[i] = (int16_t)fmaxf(-32768.0f, fminf(32767.0f, s));
+            }
+        } else {
+
         float block_peak = 0.0f;
         for (int i = 0; i < n_audio; i++) {
             float a = fabsf(audio_dec[i]);
@@ -641,6 +691,8 @@ int main(int argc, char **argv) {
             if (s < -32768.0f) s = -32768.0f;
             pcm[i] = (int16_t)s;
         }
+
+        } /* end !MODE_DISC */
 
         /* ── Output audio frame ── */
         if (n_audio > 0) {

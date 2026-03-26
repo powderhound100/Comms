@@ -37,6 +37,7 @@ logger = logging.getLogger("radio")
 # Path to the C demodulator executable (same directory as this script)
 SCRIPT_DIR = Path(__file__).parent.resolve()
 RADIO_EXE = str(SCRIPT_DIR / "groundlink_radio.exe")
+DSD_FME_EXE = str(SCRIPT_DIR / "dsd-fme.exe")
 
 # RTL-SDR DLL directory — needed at runtime
 RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
@@ -47,12 +48,13 @@ class RadioProcess:
 
     def __init__(self):
         self.proc: asyncio.subprocess.Process | None = None
+        self.dsd_proc: asyncio.subprocess.Process | None = None
         self.freq_hz: int = int(94.9e6)
         self.mode: str = "wfm"
         self.gain: int = 400  # tenths of dB
 
     async def start(self):
-        """Spawn the C demodulator process."""
+        """Spawn the C demodulator process (and DSD-FME for P25)."""
         if self.proc is not None:
             await self.stop()
 
@@ -62,10 +64,13 @@ class RadioProcess:
         if RTLSDR_DIR not in path:
             env["PATH"] = RTLSDR_DIR + ";" + path
 
+        # For P25 mode, use discriminator output from groundlink_radio
+        radio_mode = "disc" if self.mode == "p25" else self.mode
+
         cmd = [
             RADIO_EXE,
             "--freq", str(self.freq_hz),
-            "--mode", self.mode,
+            "--mode", radio_mode,
             "--gain", str(self.gain),
         ]
         logger.info("Starting: %s", " ".join(cmd))
@@ -80,8 +85,48 @@ class RadioProcess:
         asyncio.create_task(self._log_stderr())
         logger.info("Process started (PID %d)", self.proc.pid)
 
+        # For P25 mode, spawn DSD-FME decoder
+        if self.mode == "p25":
+            if os.path.isfile(DSD_FME_EXE):
+                try:
+                    self.dsd_proc = await asyncio.create_subprocess_exec(
+                        DSD_FME_EXE, "-i", "-", "-o", "-",
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        env=env,
+                    )
+                    asyncio.create_task(self._log_dsd_stderr())
+                    logger.info("DSD-FME started (PID %d) — P25 decoding active",
+                                self.dsd_proc.pid)
+                except Exception as e:
+                    logger.warning("Failed to start DSD-FME: %s", e)
+                    self.dsd_proc = None
+            else:
+                logger.warning("dsd-fme.exe not found at %s — P25 decoding unavailable, "
+                               "raw discriminator audio will pass through", DSD_FME_EXE)
+                self.dsd_proc = None
+
     async def stop(self):
-        """Kill the subprocess."""
+        """Kill the subprocess(es)."""
+        # Stop DSD-FME first
+        if self.dsd_proc is not None:
+            dsd_pid = self.dsd_proc.pid
+            try:
+                if self.dsd_proc.stdin:
+                    self.dsd_proc.stdin.close()
+                self.dsd_proc.terminate()
+                try:
+                    await asyncio.wait_for(self.dsd_proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.dsd_proc.kill()
+                    await self.dsd_proc.wait()
+            except ProcessLookupError:
+                pass
+            self.dsd_proc = None
+            logger.info("DSD-FME stopped (PID %d)", dsd_pid)
+
+        # Stop groundlink_radio
         if self.proc is None:
             return
         pid = self.proc.pid
@@ -116,6 +161,19 @@ class RadioProcess:
         except Exception:
             pass
 
+    async def _log_dsd_stderr(self):
+        """Forward DSD-FME stderr to our logger."""
+        if self.dsd_proc is None or self.dsd_proc.stderr is None:
+            return
+        try:
+            while True:
+                line = await self.dsd_proc.stderr.readline()
+                if not line:
+                    break
+                logger.info("[DSD] %s", line.decode("utf-8", errors="replace").rstrip())
+        except Exception:
+            pass
+
 
 async def radio_handler(websocket, radio: RadioProcess):
     """Handle a single WebSocket client — stream audio + spectrum."""
@@ -140,8 +198,51 @@ async def radio_handler(websocket, radio: RadioProcess):
 
     logger.info("Client connected: %.3f MHz [%s]", freq / 1e6, mode.upper())
 
+    # DSD-FME audio reader coroutine (P25 mode)
+    dsd_task = None
+
+    async def read_dsd_audio():
+        """Read decoded PCM from DSD-FME stdout, upsample 8k→48k, send to WS."""
+        dsd_audio_count = 0
+        chunk_bytes = 1280 * 2  # 1280 samples × 2 bytes/sample (int16) = 160ms at 8kHz
+        try:
+            while radio.dsd_proc and radio.dsd_proc.stdout:
+                raw = await radio.dsd_proc.stdout.read(chunk_bytes)
+                if not raw:
+                    break
+                # Convert int16 → float32
+                int16_arr = np.frombuffer(raw, dtype=np.int16)
+                float32_arr = int16_arr.astype(np.float32) / 32768.0
+
+                # Upsample 8k → 48k (6× linear interpolation)
+                n_in = len(float32_arr)
+                n_out = n_in * 6
+                x_in = np.arange(n_in)
+                x_out = np.linspace(0, n_in - 1, n_out)
+                upsampled = np.interp(x_out, x_in, float32_arr).astype(np.float32)
+
+                audio_b64 = base64.b64encode(upsampled.tobytes()).decode('ascii')
+
+                dsd_audio_count += 1
+                if dsd_audio_count <= 5 or dsd_audio_count % 50 == 0:
+                    logger.info("DSD audio #%d: %d→%d samples (8k→48k)",
+                                dsd_audio_count, n_in, n_out)
+
+                await websocket.send(json.dumps({
+                    "type": "audio",
+                    "samples": audio_b64,
+                    "sample_rate": 48000,
+                    "freq_hz": radio.freq_hz,
+                    "mode": radio.mode,
+                }))
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("DSD reader error: %s", e)
+
     # Handle tune commands from the client (background task)
     async def read_commands():
+        nonlocal dsd_task
         try:
             async for msg in websocket:
                 try:
@@ -151,13 +252,24 @@ async def radio_handler(websocket, radio: RadioProcess):
                         new_mode = data.get("mode", radio.mode)
                         logger.info("Tune command: %.3f MHz [%s]",
                                     new_freq / 1e6, new_mode.upper())
+                        # Cancel existing DSD reader if switching modes
+                        if dsd_task and not dsd_task.done():
+                            dsd_task.cancel()
+                            dsd_task = None
                         await radio.restart(new_freq, new_mode)
+                        # Start DSD reader if switching to P25
+                        if new_mode == "p25" and radio.dsd_proc:
+                            dsd_task = asyncio.create_task(read_dsd_audio())
                 except (json.JSONDecodeError, ValueError):
                     pass
         except websockets.exceptions.ConnectionClosed:
             pass
 
     cmd_task = asyncio.create_task(read_commands())
+
+    # Start DSD reader task if initial mode is P25
+    if radio.mode == "p25" and radio.dsd_proc:
+        dsd_task = asyncio.create_task(read_dsd_audio())
 
     audio_count = 0
     spectrum_count = 0
@@ -179,26 +291,39 @@ async def radio_handler(websocket, radio: RadioProcess):
                 if frame_type == b'A':
                     # Audio frame: sample_rate (4B) + int16[] PCM
                     payload = await proc.stdout.readexactly(payload_len)
-                    sample_rate = struct.unpack('<I', payload[:4])[0]
-                    pcm_data = payload[4:]
 
-                    # Convert int16 PCM → float32 → base64 (matches deployed frontend)
-                    int16_arr = np.frombuffer(pcm_data, dtype=np.int16)
-                    float32_arr = (int16_arr.astype(np.float32) / 32768.0)
-                    audio_b64 = base64.b64encode(float32_arr.tobytes()).decode('ascii')
+                    if radio.mode == "p25" and radio.dsd_proc:
+                        # P25: pipe raw PCM (skip sample_rate header) to DSD-FME
+                        pcm_data = payload[4:]
+                        try:
+                            radio.dsd_proc.stdin.write(pcm_data)
+                            await radio.dsd_proc.stdin.drain()
+                        except (BrokenPipeError, ConnectionResetError):
+                            logger.warning("DSD-FME stdin pipe broken")
+                        audio_count += 1
+                        if audio_count <= 5 or audio_count % 50 == 0:
+                            logger.info("Disc→DSD frame #%d: %d bytes",
+                                        audio_count, len(pcm_data))
+                    else:
+                        # Analog mode: convert and send directly to WS
+                        sample_rate = struct.unpack('<I', payload[:4])[0]
+                        pcm_data = payload[4:]
+                        int16_arr = np.frombuffer(pcm_data, dtype=np.int16)
+                        float32_arr = (int16_arr.astype(np.float32) / 32768.0)
+                        audio_b64 = base64.b64encode(float32_arr.tobytes()).decode('ascii')
 
-                    audio_count += 1
-                    if audio_count <= 5 or audio_count % 50 == 0:
-                        logger.info("Audio frame #%d: %d samples, rate=%d Hz",
-                                    audio_count, len(int16_arr), sample_rate)
+                        audio_count += 1
+                        if audio_count <= 5 or audio_count % 50 == 0:
+                            logger.info("Audio frame #%d: %d samples, rate=%d Hz",
+                                        audio_count, len(int16_arr), sample_rate)
 
-                    await websocket.send(json.dumps({
-                        "type": "audio",
-                        "samples": audio_b64,
-                        "sample_rate": sample_rate,
-                        "freq_hz": radio.freq_hz,
-                        "mode": radio.mode,
-                    }))
+                        await websocket.send(json.dumps({
+                            "type": "audio",
+                            "samples": audio_b64,
+                            "sample_rate": sample_rate,
+                            "freq_hz": radio.freq_hz,
+                            "mode": radio.mode,
+                        }))
 
                 elif frame_type == b'S':
                     # Spectrum frame: center_freq (4B) + float32[] bins
@@ -233,6 +358,11 @@ async def radio_handler(websocket, radio: RadioProcess):
                 await asyncio.sleep(0.5)
                 if radio.proc is None or radio.proc.returncode is not None:
                     await radio.start()
+                    # Restart DSD reader if P25
+                    if radio.mode == "p25" and radio.dsd_proc:
+                        if dsd_task and not dsd_task.done():
+                            dsd_task.cancel()
+                        dsd_task = asyncio.create_task(read_dsd_audio())
 
             except websockets.exceptions.ConnectionClosed:
                 break
@@ -240,6 +370,8 @@ async def radio_handler(websocket, radio: RadioProcess):
     except Exception as e:
         logger.warning("Handler error: %s", e)
     finally:
+        if dsd_task and not dsd_task.done():
+            dsd_task.cancel()
         cmd_task.cancel()
         await radio.stop()
         logger.info("Client disconnected")
@@ -248,7 +380,7 @@ async def radio_handler(websocket, radio: RadioProcess):
 @click.command()
 @click.option("--port", default=8770, help="WebSocket port")
 @click.option("--freq", default=94.9, help="Initial frequency (MHz)")
-@click.option("--mode", default="wfm", type=click.Choice(["wfm", "nfm", "am"]),
+@click.option("--mode", default="wfm", type=click.Choice(["wfm", "nfm", "am", "p25"]),
               help="Demod mode")
 def main(port, freq, mode):
     """GROUNDLINK Radio — Live SDR audio receiver (C backend)."""
