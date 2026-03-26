@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -251,6 +252,77 @@ async def handle_stop(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+# ── Aircraft log endpoints ──
+
+DB_PATH = SCRIPT_DIR / "db" / "aircraft.db"
+
+
+def _get_db() -> "sqlite3.Connection":
+    import sqlite3
+    return sqlite3.connect(str(DB_PATH))
+
+
+async def handle_aircraft_log(request: web.Request) -> web.Response:
+    """Return aircraft log: unique aircraft + stats."""
+    try:
+        conn = _get_db()
+        conn.row_factory = sqlite3.Row
+
+        stats_row = conn.execute("SELECT COUNT(*) as total FROM aircraft").fetchone()
+        total = stats_row["total"] if stats_row else 0
+
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        today_count = conn.execute(
+            "SELECT COUNT(DISTINCT icao) FROM sightings WHERE ts >= ?",
+            (today + "T00:00:00Z",),
+        ).fetchone()[0]
+
+        sighting_count = conn.execute("SELECT COUNT(*) FROM sightings").fetchone()[0]
+
+        # All unique aircraft, most recent first
+        aircraft = []
+        for row in conn.execute(
+            "SELECT icao, callsign, first_seen, last_seen, total_msgs, sessions "
+            "FROM aircraft ORDER BY last_seen DESC"
+        ):
+            aircraft.append({
+                "icao": row["icao"],
+                "callsign": row["callsign"],
+                "first_seen": row["first_seen"],
+                "last_seen": row["last_seen"],
+                "total_msgs": row["total_msgs"],
+                "sessions": row["sessions"],
+            })
+
+        # Last known position for each aircraft (subquery)
+        positions = {}
+        for row in conn.execute("""
+            SELECT s.icao, s.lat, s.lon, s.alt_ft, s.gs_kt, s.hdg, s.ts
+            FROM sightings s
+            INNER JOIN (SELECT icao, MAX(id) as max_id FROM sightings GROUP BY icao) m
+            ON s.icao = m.icao AND s.id = m.max_id
+        """):
+            positions[row["icao"]] = {
+                "lat": row["lat"], "lon": row["lon"],
+                "alt_ft": row["alt_ft"], "gs_kt": row["gs_kt"],
+                "hdg": row["hdg"], "ts": row["ts"],
+            }
+
+        for ac in aircraft:
+            ac["last_pos"] = positions.get(ac["icao"])
+
+        conn.close()
+
+        return web.json_response({
+            "unique_aircraft": total,
+            "today": today_count,
+            "total_sightings": sighting_count,
+            "aircraft": aircraft,
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e), "aircraft": []}, status=200)
+
+
 def build_app() -> web.Application:
     app = web.Application()
     # CORS middleware for Docker → host requests
@@ -269,6 +341,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/sdr", handle_status)
     app.router.add_post("/api/sdr/start", handle_start)
     app.router.add_post("/api/sdr/stop", handle_stop)
+    app.router.add_get("/api/adsb/log", handle_aircraft_log)
     return app
 
 

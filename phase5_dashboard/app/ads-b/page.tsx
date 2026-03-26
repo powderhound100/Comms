@@ -135,6 +135,19 @@ export default function ADSBPage() {
   const [sortCol, setSortCol] = useState<string>('callsign')
   const [sortAsc, setSortAsc] = useState(true)
 
+  // Aircraft log state
+  interface LoggedAircraft {
+    icao: string
+    callsign: string | null
+    first_seen: string
+    last_seen: string
+    total_msgs: number
+    sessions: number
+    last_pos: { lat: number; lon: number; alt_ft: number | null; gs_kt: number | null; hdg: number | null; ts: string } | null
+  }
+  const [logData, setLogData] = useState<{ unique_aircraft: number; today: number; total_sightings: number; aircraft: LoggedAircraft[] }>({ unique_aircraft: 0, today: 0, total_sightings: 0, aircraft: [] })
+  const [showLog, setShowLog] = useState(false)
+
   // SDR mode control
   const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('adsb')
   const [testMode, setTestMode] = useState(false)
@@ -145,6 +158,19 @@ export default function ADSBPage() {
   const trailsRef = useRef<Record<string, [number, number][]>>({})
 
   useSpectrumCanvas(canvasRef, psdData, 1090e6, 2e6)
+
+  // Poll aircraft log
+  useEffect(() => {
+    async function fetchLog() {
+      try {
+        const res = await fetch('/api/adsb/log')
+        if (res.ok) setLogData(await res.json())
+      } catch { /* offline */ }
+    }
+    fetchLog()
+    const timer = setInterval(fetchLog, 10000)
+    return () => clearInterval(timer)
+  }, [])
 
   const handleStart = useCallback(async () => {
     await sdrStart({ gain, test: testMode })
@@ -601,6 +627,76 @@ export default function ADSBPage() {
           </div>
         </div>
       )}
+
+      {/* Aircraft Log (historical) */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
+        <button
+          onClick={() => setShowLog(!showLog)}
+          className="w-full px-4 py-3 border-b border-gray-800 flex items-center justify-between hover:bg-gray-800/30 transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-gray-300">Aircraft Log</span>
+            <span className="text-xs font-mono text-cyan-400">{logData.unique_aircraft} unique</span>
+            <span className="text-xs font-mono text-gray-500">{logData.today} today</span>
+            <span className="text-xs font-mono text-gray-500">{logData.total_sightings.toLocaleString()} sightings</span>
+          </div>
+          <span className="text-xs text-gray-500">{showLog ? 'Hide' : 'Show'}</span>
+        </button>
+        {showLog && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-800 text-gray-400 text-left">
+                  <th className="px-3 py-2">ICAO</th>
+                  <th className="px-3 py-2">Callsign</th>
+                  <th className="px-3 py-2">First Seen</th>
+                  <th className="px-3 py-2">Last Seen</th>
+                  <th className="px-3 py-2">Msgs</th>
+                  <th className="px-3 py-2">Last Position</th>
+                  <th className="px-3 py-2">Alt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logData.aircraft.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-6 text-center text-gray-600">
+                      No aircraft logged yet — start the decoder to begin collecting
+                    </td>
+                  </tr>
+                ) : (
+                  logData.aircraft.map(ac => (
+                    <tr key={ac.icao} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                      <td className="px-3 py-1.5 font-mono text-amber-400">{ac.icao}</td>
+                      <td className="px-3 py-1.5 font-medium">
+                        {ac.callsign || <span className="text-gray-600">---</span>}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-gray-400">
+                        {new Date(ac.first_seen).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-gray-400">
+                        {new Date(ac.last_seen).toLocaleString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono">{ac.total_msgs.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 font-mono text-gray-400">
+                        {ac.last_pos
+                          ? `${ac.last_pos.lat.toFixed(3)}, ${ac.last_pos.lon.toFixed(3)}`
+                          : <span className="text-gray-600">---</span>
+                        }
+                      </td>
+                      <td className="px-3 py-1.5 font-mono">
+                        {ac.last_pos?.alt_ft != null
+                          ? `${ac.last_pos.alt_ft.toLocaleString()} ft`
+                          : <span className="text-gray-600">---</span>
+                        }
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
