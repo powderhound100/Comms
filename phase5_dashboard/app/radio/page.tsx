@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+import RadioVisualizer from '@/components/RadioVisualizer'
 import { radioChains, spectrumChain, radioModes, audioTransport, dspConcepts } from '@/data/radio'
 
 // ──────────────────────────────────────────────────────────────
@@ -241,8 +242,10 @@ export default function RadioPage() {
   const [psdData, setPsdData] = useState<number[] | null>(null)
   const [signalStrength, setSignalStrength] = useState(-70)
   const [bufferPct, setBufferPct] = useState(0)
+  const [showVisualizer, setShowVisualizer] = useState(true)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pcmRef = useRef<Float32Array | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
   const workletNodeRef = useRef<AudioWorkletNode | null>(null)
@@ -342,6 +345,7 @@ export default function RadioPage() {
           float32[i] = int16[i] / 32768.0
         }
         workletNode.port.postMessage({ type: 'audio', samples: float32 })
+        pcmRef.current = float32
         audioFrames++
         if (audioFrames <= 3 || audioFrames % 100 === 0) {
           console.log(`[Radio] Audio frame #${audioFrames}: ${int16.length} samples, peak=${Math.max(...float32.slice(0, 100)).toFixed(3)}`)
@@ -563,7 +567,23 @@ export default function RadioPage() {
               </span>
             </div>
           )}
+          {/* Visualizer toggle */}
+          <button
+            onClick={() => setShowVisualizer(v => !v)}
+            className={`absolute top-2 right-2 px-2 py-1 text-[10px] uppercase tracking-wider font-mono rounded transition-colors border ${
+              showVisualizer
+                ? 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-400'
+                : 'bg-black/40 border-gray-700 text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            VIS
+          </button>
         </div>
+
+        {/* Music Visualizer */}
+        {showVisualizer && (
+          <RadioVisualizer psdData={psdData} pcmBuffer={pcmRef.current} playing={playing} />
+        )}
       </div>
 
       {/* ── Frequency Dial ── */}
