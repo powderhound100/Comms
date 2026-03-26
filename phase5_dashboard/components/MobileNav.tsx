@@ -13,7 +13,7 @@ export default function MobileNav({ links }: MobileNavProps) {
   const pathname = usePathname()
 
   return (
-    <div className="lg:hidden">
+    <div>
       <button
         onClick={() => setOpen(!open)}
         className="p-2 text-gray-400 hover:text-white transition-colors"

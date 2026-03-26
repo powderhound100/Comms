@@ -35,19 +35,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="text-xl font-bold text-emerald-400 shrink-0">
               GROUNDLINK
             </Link>
-            {/* Desktop nav */}
-            <div className="hidden lg:flex gap-4 overflow-x-auto scrollbar-hide">
-              {navLinks.map(link => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="text-sm text-gray-400 hover:text-white transition-colors whitespace-nowrap"
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </div>
-            {/* Mobile nav */}
             <MobileNav links={navLinks} />
           </div>
         </nav>
