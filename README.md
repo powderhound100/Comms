@@ -149,6 +149,11 @@ A **Next.js + Tailwind** web interface with real-time WebSocket streaming:
 
 The **SDR Mode Bar** at the top switches between Radio / Scanner / ADS-B with one click.
 
+<p align="center">
+  <img src="docs/screenshots/satellite-imagery.png" alt="Satellite Imagery — signal chain, SatDump pipelines for GOES-18/Meteor-M2/NOAA-19, decoding workflow, and image gallery" width="100%">
+</p>
+<p align="center"><em>Satellite Imagery — reception pipeline, SatDump decode configs for 3 satellites, automated 6-step workflow, and decoded image gallery</em></p>
+
 ---
 
 ## Hardware
