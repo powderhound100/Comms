@@ -15,6 +15,7 @@ Usage:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+import numpy as np
 import click
 
 logging.basicConfig(
@@ -157,6 +159,9 @@ async def radio_handler(websocket, radio: RadioProcess):
 
     cmd_task = asyncio.create_task(read_commands())
 
+    audio_count = 0
+    spectrum_count = 0
+
     try:
         # Main loop: read binary frames from C process stdout, forward to WS
         while True:
@@ -177,8 +182,23 @@ async def radio_handler(websocket, radio: RadioProcess):
                     sample_rate = struct.unpack('<I', payload[:4])[0]
                     pcm_data = payload[4:]
 
-                    # Send raw binary PCM to client (no base64, no JSON)
-                    await websocket.send(pcm_data)
+                    # Convert int16 PCM → float32 → base64 (matches deployed frontend)
+                    int16_arr = np.frombuffer(pcm_data, dtype=np.int16)
+                    float32_arr = (int16_arr.astype(np.float32) / 32768.0)
+                    audio_b64 = base64.b64encode(float32_arr.tobytes()).decode('ascii')
+
+                    audio_count += 1
+                    if audio_count <= 5 or audio_count % 50 == 0:
+                        logger.info("Audio frame #%d: %d samples, rate=%d Hz",
+                                    audio_count, len(int16_arr), sample_rate)
+
+                    await websocket.send(json.dumps({
+                        "type": "audio",
+                        "samples": audio_b64,
+                        "sample_rate": sample_rate,
+                        "freq_hz": radio.freq_hz,
+                        "mode": radio.mode,
+                    }))
 
                 elif frame_type == b'S':
                     # Spectrum frame: center_freq (4B) + float32[] bins
@@ -187,6 +207,12 @@ async def radio_handler(websocket, radio: RadioProcess):
                     spectrum_data = payload[4:]
                     n_bins = len(spectrum_data) // 4
                     bins = struct.unpack(f'<{n_bins}f', spectrum_data)
+
+                    spectrum_count += 1
+                    if spectrum_count <= 3:
+                        logger.info("Spectrum #%d: %d bins, range=[%.1f, %.1f] dBFS",
+                                    spectrum_count, n_bins,
+                                    min(bins), max(bins))
 
                     # Send spectrum as JSON text frame
                     await websocket.send(json.dumps({

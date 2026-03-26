@@ -133,10 +133,11 @@ static void compute_spectrum(const float *iq_i, const float *iq_q,
 
     fft_radix2(re, im_buf, FFT_SIZE);
 
-    /* Magnitude² → dBFS, reorder so DC is in center, downsample 4x */
+    /* Magnitude² → dBFS, normalize by N², reorder DC-center, downsample 4x */
     float mag2[FFT_SIZE];
+    float norm = 1.0f / ((float)FFT_SIZE * (float)FFT_SIZE);
     for (i = 0; i < FFT_SIZE; i++) {
-        mag2[i] = re[i] * re[i] + im_buf[i] * im_buf[i];
+        mag2[i] = (re[i] * re[i] + im_buf[i] * im_buf[i]) * norm;
     }
 
     /* FFT output: [0..N/2-1] = DC to +fs/2,  [N/2..N-1] = -fs/2 to DC
@@ -379,6 +380,10 @@ int main(int argc, char **argv) {
     /* FM demod prev sample */
     float prev_i = 0.0f, prev_q = 0.0f;
 
+    /* AM: running DC removal and AGC state (persist across blocks) */
+    float am_dc = 0.0f;        /* IIR DC estimator */
+    float agc_peak = 0.01f;    /* slow AGC envelope */
+
     int frame_count = 0;
 
     /* ── Main loop ── */
@@ -485,16 +490,13 @@ int main(int argc, char **argv) {
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2);
 
-            /* AM envelope detection */
-            float dc_sum = 0.0f;
+            /* AM envelope detection with IIR DC removal (no block boundary clicks) */
+            /* DC alpha: ~20 Hz high-pass at 48 kHz → smooth DC tracking */
+            float dc_alpha = 1.0f - expf(-2.0f * PI_F * 20.0f / 48000.0f);
             for (int i = 0; i < n3; i++) {
-                audio[i] = sqrtf(dec1_i[i] * dec1_i[i] + dec1_q[i] * dec1_q[i]);
-                dc_sum += audio[i];
-            }
-            /* Remove DC offset */
-            float dc = dc_sum / (float)n3;
-            for (int i = 0; i < n3; i++) {
-                audio[i] -= dc;
+                float mag = sqrtf(dec1_i[i] * dec1_i[i] + dec1_q[i] * dec1_q[i]);
+                am_dc += dc_alpha * (mag - am_dc);  /* track DC smoothly */
+                audio[i] = mag - am_dc;             /* remove DC */
             }
 
             /* Decimate audio: 48k → /3 → 16k */
@@ -505,12 +507,26 @@ int main(int argc, char **argv) {
         }
 
         /* ── Normalize + convert to int16 PCM ── */
-        float peak = 0.0f;
+        float block_peak = 0.0f;
         for (int i = 0; i < n_audio; i++) {
             float a = fabsf(audio_dec[i]);
-            if (a > peak) peak = a;
+            if (a > block_peak) block_peak = a;
         }
-        float scale = (peak > 1e-6f) ? (0.9f * 32767.0f / peak) : 32767.0f;
+
+        float scale;
+        if (mode == MODE_AM) {
+            /* Slow AGC for AM: fast attack, slow release — no gain pumping */
+            if (block_peak > agc_peak) {
+                agc_peak += 0.3f * (block_peak - agc_peak);   /* fast attack */
+            } else {
+                agc_peak += 0.005f * (block_peak - agc_peak); /* slow release */
+            }
+            scale = (agc_peak > 1e-6f) ? (0.6f * 32767.0f / agc_peak) : 32767.0f;
+        } else {
+            /* FM: per-block normalize is fine (continuous signal) */
+            scale = (block_peak > 1e-6f) ? (0.9f * 32767.0f / block_peak) : 32767.0f;
+        }
+
         for (int i = 0; i < n_audio; i++) {
             float s = audio_dec[i] * scale;
             if (s > 32767.0f) s = 32767.0f;

@@ -315,6 +315,7 @@ export default function RadioPage() {
     ws.onclose = () => setConnected(false)
     ws.onerror = () => { /* will trigger onclose */ }
 
+    let audioFrames = 0
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
         // Binary frame — int16 PCM audio from C demodulator
@@ -325,7 +326,11 @@ export default function RadioPage() {
           float32[i] = int16[i] / 32768.0
         }
         workletNode.port.postMessage({ type: 'audio', samples: float32 })
-      } else {
+        audioFrames++
+        if (audioFrames <= 3 || audioFrames % 100 === 0) {
+          console.log(`[Radio] Audio frame #${audioFrames}: ${int16.length} samples, peak=${Math.max(...float32.slice(0, 100)).toFixed(3)}`)
+        }
+      } else if (typeof event.data === 'string') {
         // Text frame — spectrum JSON
         try {
           const data = JSON.parse(event.data)
@@ -336,6 +341,9 @@ export default function RadioPage() {
             }
           }
         } catch { /* skip malformed JSON */ }
+      } else {
+        // Unknown data type — log for debugging
+        console.warn('[Radio] Unknown WS data type:', typeof event.data, event.data)
       }
     }
   }, [playing, freq, mode, volume])
