@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+import SdrModeBar from '@/components/SdrModeBar'
+import { useSdr } from '@/hooks/use-sdr'
 
 // Leaflet needs window — dynamic import with SSR disabled
 const AircraftMap = dynamic(() => import('@/components/AircraftMap'), { ssr: false })
@@ -104,6 +106,8 @@ function protocolBadge(protocol: string | null) {
 }
 
 export default function ScanDetectPage() {
+  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('scanner')
+
   const [status, setStatus] = useState<ScannerStatus>({
     running: false,
     scan_id: null,
@@ -393,6 +397,19 @@ export default function ScanDetectPage() {
           SDR-powered broadband signal scanning with real-time AMR classification and demodulation
         </p>
       </div>
+
+      <SdrModeBar
+        myMode="scanner"
+        isMyMode={isMyMode}
+        isOtherMode={isOtherMode}
+        activeMode={sdrStatus.active_mode}
+        loading={sdrLoading}
+        pid={sdrStatus.pid}
+        uptime={sdrStatus.uptime_s}
+        log={sdrStatus.log}
+        onStart={() => sdrStart({ mock: false, mode: scanMode })}
+        onStop={sdrStop}
+      />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-8">

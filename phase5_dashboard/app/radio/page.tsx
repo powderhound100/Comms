@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
 import RadioVisualizer from '@/components/RadioVisualizer'
 import { radioChains, spectrumChain, radioModes, audioTransport, dspConcepts } from '@/data/radio'
+import SdrModeBar from '@/components/SdrModeBar'
+import { useSdr } from '@/hooks/use-sdr'
 
 // ──────────────────────────────────────────────────────────────
 // Preset stations — Seattle area
@@ -232,6 +234,8 @@ function useSpectrumCanvas(
 // ──────────────────────────────────────────────────────────────
 
 export default function RadioPage() {
+  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('radio')
+
   const [freq, setFreq] = useState(94.9e6)
   const [mode, setMode] = useState<'wfm' | 'nfm' | 'am'>('wfm')
   const [volume, setVolume] = useState(0.7)
@@ -252,6 +256,11 @@ export default function RadioPage() {
   const wsRef = useRef<WebSocket | null>(null)
 
   useSpectrumCanvas(canvasRef, psdData, freq, 2.4e6)
+
+  const handleSdrStart = useCallback(async () => {
+    await sdrStart({ freq: freq / 1e6, mode })
+  }, [sdrStart, freq, mode])
+
 
   // Tune to a frequency
   const tune = useCallback(async (newFreq: number, newMode: 'wfm' | 'nfm' | 'am', presetName?: string) => {
@@ -341,7 +350,7 @@ export default function RadioPage() {
     let audioFrames = 0
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
-        // Binary frame — int16 PCM audio from C demodulator
+        // Binary frame — int16 PCM audio
         if (actx.state === 'suspended') actx.resume()
         const int16 = new Int16Array(event.data)
         const float32 = new Float32Array(int16.length)
@@ -355,7 +364,7 @@ export default function RadioPage() {
           console.log(`[Radio] Audio frame #${audioFrames}: ${int16.length} samples, peak=${Math.max(...float32.slice(0, 100)).toFixed(3)}`)
         }
       } else if (typeof event.data === 'string') {
-        // Text frame — spectrum JSON
+        // Text frame — JSON (spectrum or audio)
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'spectrum') {
@@ -363,11 +372,21 @@ export default function RadioPage() {
             if (data.psd_dbfs?.length) {
               setSignalStrength(Math.max(...data.psd_dbfs))
             }
+          } else if (data.type === 'audio' && data.samples) {
+            // Base64-encoded float32 PCM audio from radio backend
+            if (actx.state === 'suspended') actx.resume()
+            const binaryStr = atob(data.samples)
+            const bytes = new Uint8Array(binaryStr.length)
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+            const float32 = new Float32Array(bytes.buffer)
+            workletNode.port.postMessage({ type: 'audio', samples: float32 })
+            pcmRef.current = float32
+            audioFrames++
+            if (audioFrames <= 3 || audioFrames % 100 === 0) {
+              console.log(`[Radio] Audio frame #${audioFrames}: ${float32.length} samples, peak=${Math.max(...float32.slice(0, 100)).toFixed(3)}`)
+            }
           }
         } catch { /* skip malformed JSON */ }
-      } else {
-        // Unknown data type — log for debugging
-        console.warn('[Radio] Unknown WS data type:', typeof event.data, event.data)
       }
     }
   }, [playing, freq, mode, volume])
@@ -404,6 +423,19 @@ export default function RadioPage() {
           Live SDR receiver — tune to any frequency and listen
         </p>
       </div>
+
+      <SdrModeBar
+        myMode="radio"
+        isMyMode={isMyMode}
+        isOtherMode={isOtherMode}
+        activeMode={sdrStatus.active_mode}
+        loading={sdrLoading}
+        pid={sdrStatus.pid}
+        uptime={sdrStatus.uptime_s}
+        log={sdrStatus.log}
+        onStart={handleSdrStart}
+        onStop={sdrStop}
+      />
 
       {/* ── Main Tuner Panel ── */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-8 overflow-hidden">

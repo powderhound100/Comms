@@ -12,6 +12,8 @@ import {
   decodeChain,
 } from '@/data/ads-b'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+import SdrModeBar from '@/components/SdrModeBar'
+import { useSdr } from '@/hooks/use-sdr'
 
 // ── Spectrum canvas hook (same pattern as radio page) ──
 
@@ -133,15 +135,10 @@ export default function ADSBPage() {
   const [sortCol, setSortCol] = useState<string>('callsign')
   const [sortAsc, setSortAsc] = useState(true)
 
-  // Decoder control state
-  const [decoderRunning, setDecoderRunning] = useState(false)
-  const [decoderLoading, setDecoderLoading] = useState(false)
+  // SDR mode control
+  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('adsb')
   const [testMode, setTestMode] = useState(false)
   const [gain, setGain] = useState(496)
-  const [decoderPid, setDecoderPid] = useState<number | null>(null)
-  const [uptime, setUptime] = useState(0)
-  const [decoderLog, setDecoderLog] = useState<string[]>([])
-  const [showLog, setShowLog] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -149,61 +146,24 @@ export default function ADSBPage() {
 
   useSpectrumCanvas(canvasRef, psdData, 1090e6, 2e6)
 
-  // Poll decoder status
+  const handleStart = useCallback(async () => {
+    await sdrStart({ gain, test: testMode })
+  }, [sdrStart, gain, testMode])
+
+  const handleStop = useCallback(async () => {
+    await sdrStop()
+    setAircraft([])
+    setTrails({})
+    trailsRef.current = {}
+    setPsdData(null)
+    setTotalMsgs(0)
+    setMsgRate(0)
+    setAircraftCount(0)
+  }, [sdrStop])
+
+  // WebSocket connection — only when ADS-B mode is active
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null
-
-    async function poll() {
-      try {
-        const res = await fetch('/api/adsb')
-        const data = await res.json()
-        setDecoderRunning(data.running)
-        setDecoderPid(data.pid)
-        setUptime(data.uptime_s ?? 0)
-        if (data.log) setDecoderLog(data.log)
-      } catch { /* offline */ }
-    }
-
-    poll()
-    timer = setInterval(poll, 3000)
-    return () => { if (timer) clearInterval(timer) }
-  }, [])
-
-  // Start / stop decoder
-  const handleDecoderToggle = useCallback(async () => {
-    setDecoderLoading(true)
-    try {
-      const action = decoderRunning ? 'stop' : 'start'
-      const res = await fetch('/api/adsb', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          ...(action === 'start' ? { gain, test: testMode } : {}),
-        }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setDecoderRunning(action === 'start')
-        setDecoderPid(data.pid ?? null)
-        if (action === 'stop') {
-          setAircraft([])
-          setTrails({})
-          trailsRef.current = {}
-          setPsdData(null)
-          setTotalMsgs(0)
-          setMsgRate(0)
-          setAircraftCount(0)
-        }
-      }
-      if (data.log) setDecoderLog(data.log)
-    } catch { /* ignore */ }
-    setDecoderLoading(false)
-  }, [decoderRunning, gain, testMode])
-
-  // WebSocket connection — only when decoder is running
-  useEffect(() => {
-    if (!decoderRunning) {
+    if (!isMyMode) {
       setConnected(false)
       return
     }
@@ -297,7 +257,7 @@ export default function ADSBPage() {
       if (ws) ws.close()
       wsRef.current = null
     }
-  }, [decoderRunning])
+  }, [isMyMode])
 
   // Sort aircraft for table
   const sortedAircraft = [...aircraft].sort((a, b) => {
@@ -336,95 +296,43 @@ export default function ADSBPage() {
         </p>
       </div>
 
-      {/* Decoder Control Panel */}
-      <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 p-4">
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Start / Stop button */}
-          <button
-            onClick={handleDecoderToggle}
-            disabled={decoderLoading}
-            className={`px-5 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
-              decoderLoading
-                ? 'bg-gray-700 text-gray-400 cursor-wait'
-                : decoderRunning
-                  ? 'bg-red-600 hover:bg-red-500 text-white'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-            }`}
-          >
-            {decoderLoading
-              ? (decoderRunning ? 'Stopping...' : 'Starting...')
-              : decoderRunning ? 'Stop Decoder' : 'Start Decoder'}
-          </button>
-
-          {/* Status indicator */}
-          <div className="flex items-center gap-2">
-            <div className={`w-2.5 h-2.5 rounded-full ${
-              decoderRunning
-                ? connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-pulse'
-                : 'bg-gray-600'
-            }`} />
-            <span className="text-sm text-gray-300">
-              {decoderRunning
-                ? connected ? 'Live' : 'Decoder running, connecting...'
-                : 'Decoder stopped'}
-            </span>
-          </div>
-
-          {/* Gain */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500">Gain</label>
-            <input
-              type="number"
-              value={gain}
-              onChange={e => setGain(parseInt(e.target.value) || 0)}
-              disabled={decoderRunning}
-              className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-200 disabled:opacity-40"
-            />
-          </div>
-
-          {/* Test mode */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={testMode}
-              onChange={e => setTestMode(e.target.checked)}
-              disabled={decoderRunning}
-              className="rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500 disabled:opacity-40"
-            />
-            <span className={`text-sm ${testMode ? 'text-amber-400' : 'text-gray-400'}`}>
-              Test mode
-            </span>
-          </label>
-
-          {/* Uptime / PID */}
-          {decoderRunning && (
-            <div className="text-xs text-gray-500 font-mono ml-auto">
-              PID {decoderPid} &middot; {Math.floor(uptime / 60)}m {uptime % 60}s
-            </div>
-          )}
-
-          {/* Log toggle */}
-          <button
-            onClick={() => setShowLog(!showLog)}
-            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-          >
-            {showLog ? 'Hide log' : 'Log'}
-          </button>
+      <SdrModeBar
+        myMode="adsb"
+        isMyMode={isMyMode}
+        isOtherMode={isOtherMode}
+        activeMode={sdrStatus.active_mode}
+        loading={sdrLoading}
+        pid={sdrStatus.pid}
+        uptime={sdrStatus.uptime_s}
+        log={sdrStatus.log}
+        onStart={handleStart}
+        onStop={handleStop}
+      >
+        {/* Gain */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">Gain</label>
+          <input
+            type="number"
+            value={gain}
+            onChange={e => setGain(parseInt(e.target.value) || 0)}
+            disabled={isMyMode}
+            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-200 disabled:opacity-40"
+          />
         </div>
-
-        {/* Process log */}
-        {showLog && (
-          <div className="mt-3 bg-gray-950 rounded-lg border border-gray-800 p-3 max-h-40 overflow-y-auto">
-            {decoderLog.length === 0 ? (
-              <span className="text-xs text-gray-600 font-mono">No log output yet</span>
-            ) : (
-              decoderLog.map((line, i) => (
-                <div key={i} className="text-[11px] font-mono text-gray-400 leading-relaxed">{line}</div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+        {/* Test mode */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={testMode}
+            onChange={e => setTestMode(e.target.checked)}
+            disabled={isMyMode}
+            className="rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500 disabled:opacity-40"
+          />
+          <span className={`text-sm ${testMode ? 'text-amber-400' : 'text-gray-400'}`}>
+            Test mode
+          </span>
+        </label>
+      </SdrModeBar>
 
       {/* Status + Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
