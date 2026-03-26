@@ -1,16 +1,14 @@
 # GROUNDLINK
 
-### Turn a $90 SDR setup into a full-spectrum intelligence platform — from satellite imagery to live aircraft tracking, all in one dashboard.
+### Full-spectrum SDR platform — AI signal classification, live aircraft tracking, multi-protocol decoding, and satellite imagery in one real-time dashboard.
 
-**GROUNDLINK** is a 7-phase SDR-based platform that demonstrates end-to-end spacecraft communications engineering: link budget analysis, real satellite reception, CCSDS waveform design, encrypted over-the-air loopback, AI-powered signal classification, multi-protocol decoding, and a real-time web dashboard — all built on commodity hardware.
+**GROUNDLINK** is a 7-phase SDR-based platform covering end-to-end RF engineering: link budget analysis, real satellite reception, CCSDS waveform design, encrypted over-the-air loopback, deep learning signal classification, multi-protocol decoding, and a live web dashboard.
 
 ---
 
 ## What Makes This Different
 
-This isn't another weekend SDR project. GROUNDLINK transforms a **$15 RTL-SDR Blog V4 dongle** into a production-grade signals intelligence and communications engineering platform. Every RF number is validated against CCSDS references. Every link budget is cross-checked with real measurements. The AI classifies modulations in real time. The dashboard streams live spectrum, aircraft positions, and decoded protocols over WebSocket.
-
-**Total cost: ~$90 (receive-only) / ~$305 (full TX+RX build).**
+GROUNDLINK is a production-grade signals intelligence and communications engineering platform built around the RTL-SDR. Every RF number is validated against CCSDS references. Every link budget is cross-checked with real measurements. The AI classifies modulations in real time. The dashboard streams live spectrum, aircraft positions, and decoded protocols over WebSocket — all from a single SDR device managed by an intelligent switching agent.
 
 ---
 
@@ -95,7 +93,7 @@ The protocol decoder automatically identifies and extracts data from detected si
 | Phase | Title | Key Deliverable |
 |-------|-------|----------------|
 | **1** | **Link Budget Engine** | Python CLI validated against CCSDS references — orbital mechanics, atmospheric attenuation (ITU-R P.676/P.618), antenna patterns, noise temperature, modulation-specific BER |
-| **2** | **SDR Ground Station** | GOES-18 LRIT reception on a repurposed DirecTV dish + SAWbird+ LNA. Predicted vs. measured C/N₀ — the numbers match |
+| **2** | **SDR Ground Station** | GOES-18 LRIT reception with predicted vs. measured C/N₀ validation |
 | **3** | **CCSDS TM Waveform** | GNU Radio OOT modem — convolutional coding (r=1/2, k=7), RS(255,223), CCSDS randomizer, ASM correlator, BER vs. Eb/N₀ curves |
 | **4** | **Over-the-Air Loopback** | PlutoSDR TX + RTL-SDR RX, AES-256-GCM encryption, and a formal Interface Control Document (GL-ICD-001) |
 | **5** | **Integration Dashboard** | Next.js + Tailwind real-time dashboard with 15+ pages, WebSocket streaming, Docker + Cloudflare tunnel |
@@ -130,15 +128,10 @@ The **SDR Mode Bar** at the top switches between Radio / Scanner / ADS-B with on
 
 | Component | Model | Specs |
 |-----------|-------|-------|
-| **Antenna** | Repurposed DirecTV Slimline 5 | 51 x 61 cm oval, custom L-band feed |
+| **Antenna** | DirecTV Slimline 5 (repurposed) | 51 x 61 cm oval, custom L-band feed |
 | **LNA** | Nooelec SAWbird+ GOES | NF 0.5 dB, Gain 34 dB |
 | **SDR (RX)** | RTL-SDR Blog V4 | 24–1766 MHz, 2.4 Msps, 8-bit ADC |
 | **SDR (TX)** | ADALM-Pluto | 325–3800 MHz, 12-bit DAC (Phase 4) |
-
-| Build Level | Cost |
-|-------------|------|
-| Receive-only (Phases 1–3) | **~$90** |
-| Full TX + RX build | **~$305** |
 
 ---
 
