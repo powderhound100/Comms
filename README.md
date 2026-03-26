@@ -81,6 +81,11 @@ The scanner is a six-layer signal processing pipeline covering **24 MHz to 1.766
 - **Watch** — Park on a single frequency for persistent monitoring
 - **Band List** — Define custom band segments to hop between
 
+<p align="center">
+  <img src="docs/screenshots/scan-detect.png" alt="Scan & Detect — band selector, scanner pipeline, live waterfall spectrogram, and detection log with AI classification" width="100%">
+</p>
+<p align="center"><em>Scan & Detect — band selector, processing pipeline, live waterfall, and detection log with AI-classified signals</em></p>
+
 ---
 
 ### Multi-Protocol Decoding
@@ -111,6 +116,11 @@ The protocol decoder automatically identifies and extracts data from detected si
 | **5** | **Integration Dashboard** | Next.js + Tailwind real-time dashboard with 15+ pages, WebSocket streaming, Docker + Cloudflare tunnel |
 | **6** | **Signal Recognition** | Deep learning AMR — VTCNN2 and ResNet1d trained on RadioML 2016.10a, integrated into live scanner |
 | **7** | **Scan & Detect** | Wideband scanner, SDR switching agent, ADS-B tracker, protocol decoders, known signal catalog |
+
+<p align="center">
+  <img src="docs/screenshots/ber-curves.png" alt="BER & Constellation Viewer — BPSK simulation vs OTA measurements with coding gain and implementation loss metrics" width="100%">
+</p>
+<p align="center"><em>BER vs Eb/N₀ — Phase 3 simulation and Phase 4 OTA measurements with ~5 dB coding gain and < 1.5 dB implementation loss</em></p>
 
 ---
 
