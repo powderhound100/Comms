@@ -7,7 +7,7 @@ import sdrManager from '@/lib/sdr-manager'
  */
 
 export async function GET() {
-  const s = sdrManager.status()
+  const s = await sdrManager.status()
   return NextResponse.json({
     running: s.active_mode === 'adsb',
     pid: s.active_mode === 'adsb' ? s.pid : null,

@@ -1,13 +1,13 @@
 /**
- * Unified SDR process manager.
+ * Unified SDR process manager — HTTP client to the host-side SDR agent.
  *
- * Only one SDR mode can run at a time (shared RTL-SDR hardware).
- * This singleton tracks the active mode and manages subprocess lifecycle
- * for radio, scanner, and ADS-B backends.
+ * In Docker the dashboard can't spawn processes on the host, so we
+ * delegate to sdr_agent.py (running on the Windows host with RTL-SDR
+ * hardware) via HTTP.
+ *
+ * When running locally (npm run dev) the agent is at localhost:8780.
+ * In Docker it's at host.docker.internal:8780.
  */
-
-import { spawn, ChildProcess } from 'child_process'
-import path from 'path'
 
 export type SdrMode = 'radio' | 'scanner' | 'adsb'
 
@@ -41,182 +41,59 @@ export interface SdrStatus {
   log: string[]
 }
 
-const PHASE7_DIR = path.resolve(process.cwd(), '..', 'phase7_scan_detect')
-const RTLSDR_DIR = 'D:\\tools\\rtl-sdr\\x64'
-const MAX_LOG_LINES = 60
+const AGENT_URL = process.env.SDR_AGENT_URL || 'http://localhost:8780'
+
+const EMPTY_STATUS: SdrStatus = {
+  active_mode: null,
+  pid: null,
+  uptime_s: 0,
+  log: [],
+}
 
 class SdrManager {
-  private proc: ChildProcess | null = null
-  private mode: SdrMode | null = null
-  private startedAt: number | null = null
-  private log: string[] = []
-
-  private pushLog(line: string) {
-    this.log.push(line)
-    if (this.log.length > MAX_LOG_LINES) this.log.shift()
-  }
-
-  private isRunning(): boolean {
-    return this.proc !== null && this.proc.exitCode === null && !this.proc.killed
-  }
-
-  private buildEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env }
-    if (env.PATH && !env.PATH.includes(RTLSDR_DIR)) {
-      env.PATH = RTLSDR_DIR + ';' + env.PATH
-    }
-    return env
-  }
-
-  /** Kill the active process tree. */
-  async stop(): Promise<{ ok: boolean; stopped: SdrMode | null }> {
-    const wasMode = this.mode
-
-    if (!this.isRunning()) {
-      this.proc = null
-      this.mode = null
-      this.startedAt = null
-      return { ok: true, stopped: wasMode }
-    }
-
-    const pid = this.proc!.pid!
-    this.pushLog(`Stopping ${wasMode} (PID ${pid})...`)
-
+  /** Get current status from the host agent. */
+  async status(): Promise<SdrStatus> {
     try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
-      } else {
-        this.proc!.kill('SIGTERM')
-      }
-    } catch { /* ignore */ }
-
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        try { this.proc?.kill('SIGKILL') } catch { /* ignore */ }
-        resolve()
-      }, 3000)
-      if (this.proc) {
-        this.proc.on('exit', () => { clearTimeout(timeout); resolve() })
-      } else {
-        clearTimeout(timeout)
-        resolve()
-      }
-    })
-
-    this.pushLog(`${wasMode} stopped.`)
-    this.proc = null
-    this.mode = null
-    this.startedAt = null
-
-    return { ok: true, stopped: wasMode }
+      const res = await fetch(`${AGENT_URL}/api/sdr`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(3000),
+      })
+      if (!res.ok) return { ...EMPTY_STATUS, log: [`Agent error: ${res.status}`] }
+      return await res.json()
+    } catch {
+      return { ...EMPTY_STATUS, log: ['SDR agent not reachable'] }
+    }
   }
 
-  /** Start a mode, stopping the current one first if different. */
+  /** Start a mode (agent auto-stops current). */
   async start(newMode: SdrMode, config: ModeConfig = {}): Promise<{ ok: boolean; message: string; pid?: number }> {
-    // Stop current if running
-    if (this.isRunning()) {
-      if (this.mode === newMode) {
-        return { ok: true, message: `${newMode} already running`, pid: this.proc!.pid! }
-      }
-      this.pushLog(`Switching from ${this.mode} to ${newMode}...`)
-      await this.stop()
-      // Small delay to release RTL-SDR device
-      await new Promise(r => setTimeout(r, 800))
-    }
-
-    this.log = []
-    const env = this.buildEnv()
-    let cmd: string
-    let args: string[]
-
-    switch (newMode) {
-      case 'radio': {
-        const c = config as RadioConfig
-        cmd = 'python'
-        args = [
-          path.join(PHASE7_DIR, 'radio_server.py'),
-          '--port', String(c.port ?? 8770),
-          '--freq', String(c.freq ?? 94.9),
-          '--mode', c.mode ?? 'wfm',
-        ]
-        break
-      }
-      case 'scanner': {
-        const c = config as ScannerConfig
-        cmd = 'python'
-        args = [path.join(PHASE7_DIR, 'scanner.py')]
-        if (c.mock) args.push('--mock')
-        if (c.mode) args.push('--mode', c.mode)
-        if (c.start_freq) args.push('--start-freq', String(c.start_freq))
-        if (c.stop_freq) args.push('--stop-freq', String(c.stop_freq))
-        if (c.watch_freq) args.push('--watch-freq', String(c.watch_freq))
-        break
-      }
-      case 'adsb': {
-        const c = config as AdsbConfig
-        cmd = 'python'
-        args = [
-          path.join(PHASE7_DIR, 'adsb_server.py'),
-          '--port', String(c.port ?? 8771),
-          '--gain', String(c.gain ?? 496),
-          '--device', String(c.device ?? 0),
-        ]
-        if (c.test) args.push('--test')
-        break
-      }
-    }
-
-    this.pushLog(`Starting ${newMode}: ${cmd} ${args.join(' ')}`)
-
-    this.proc = spawn(cmd, args, {
-      cwd: PHASE7_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-
-    this.mode = newMode
-    this.startedAt = Date.now()
-
-    this.proc.stdout?.on('data', (chunk: Buffer) => {
-      chunk.toString().split('\n').filter(Boolean).forEach(l => this.pushLog(`[out] ${l}`))
-    })
-    this.proc.stderr?.on('data', (chunk: Buffer) => {
-      chunk.toString().split('\n').filter(Boolean).forEach(l => this.pushLog(`[log] ${l}`))
-    })
-    this.proc.on('exit', (code) => {
-      this.pushLog(`${newMode} exited (code ${code})`)
-      this.proc = null
-      this.mode = null
-      this.startedAt = null
-    })
-
-    // Wait a moment to catch immediate failures
-    await new Promise(r => setTimeout(r, 600))
-
-    if (this.isRunning()) {
-      return { ok: true, message: `${newMode} started`, pid: this.proc!.pid! }
-    } else {
-      const failMode = this.mode
-      this.mode = null
-      this.startedAt = null
-      return { ok: false, message: `${failMode ?? newMode} exited immediately — check log` }
+    try {
+      const res = await fetch(`${AGENT_URL}/api/sdr/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode, config }),
+        signal: AbortSignal.timeout(10000),
+      })
+      return await res.json()
+    } catch (e) {
+      return { ok: false, message: `Agent unreachable: ${e instanceof Error ? e.message : 'Unknown'}` }
     }
   }
 
-  /** Current status. */
-  status(): SdrStatus {
-    return {
-      active_mode: this.isRunning() ? this.mode : null,
-      pid: this.isRunning() ? this.proc!.pid! : null,
-      uptime_s: this.isRunning() && this.startedAt
-        ? Math.round((Date.now() - this.startedAt) / 1000)
-        : 0,
-      log: this.log.slice(-30),
+  /** Stop the active mode. */
+  async stop(): Promise<{ ok: boolean; stopped: SdrMode | null }> {
+    try {
+      const res = await fetch(`${AGENT_URL}/api/sdr/stop`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+      })
+      return await res.json()
+    } catch {
+      return { ok: false, stopped: null }
     }
   }
 }
 
-// Module-level singleton — survives across API requests in the same Node process
+// Module-level singleton
 const sdrManager = new SdrManager()
 export default sdrManager

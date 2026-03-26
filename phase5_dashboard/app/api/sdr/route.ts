@@ -3,17 +3,16 @@ import sdrManager from '@/lib/sdr-manager'
 import type { SdrMode, ModeConfig } from '@/lib/sdr-manager'
 
 /**
- * Unified SDR control — only one mode at a time.
+ * Unified SDR control — proxies to the host-side sdr_agent.py.
  *
  * GET  /api/sdr  → { active_mode, pid, uptime_s, log }
- * POST /api/sdr  → { action: "start", mode: "radio"|"scanner"|"adsb", ...config }
- *               → { action: "stop" }
+ * POST /api/sdr  → { action: "start", mode, config } | { action: "stop" }
  */
 
 const VALID_MODES: SdrMode[] = ['radio', 'scanner', 'adsb']
 
 export async function GET() {
-  return NextResponse.json(sdrManager.status())
+  return NextResponse.json(await sdrManager.status())
 }
 
 export async function POST(request: NextRequest) {
@@ -35,14 +34,14 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         ...result,
-        ...sdrManager.status(),
+        ...(await sdrManager.status()),
       }, { status: result.ok ? 200 : 500 })
 
     } else if (action === 'stop') {
       const result = await sdrManager.stop()
       return NextResponse.json({
         ...result,
-        ...sdrManager.status(),
+        ...(await sdrManager.status()),
       })
 
     } else {
