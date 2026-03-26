@@ -1,0 +1,93 @@
+export default function Home() {
+  const phases = [
+    { num: 1, title: 'Link Budget Engine', status: 'Complete', desc: 'Python link budget tool validated against CCSDS references' },
+    { num: 2, title: 'SDR Ground Station', status: 'Complete', desc: 'GOES LRIT reception, predicted vs measured C/N₀ validation' },
+    { num: 3, title: 'CCSDS TM Waveform', status: 'Complete', desc: 'GNU Radio CCSDS modem, BER vs Eb/N₀ curves' },
+    { num: 4, title: 'Over-the-Air Loopback', status: 'Complete', desc: 'SDR hardware TX/RX, AES-256 encryption, ICD document' },
+    { num: 5, title: 'Integration Dashboard', status: 'Active', desc: 'Next.js dashboard, documentation, blog series' },
+    { num: 6, title: 'Signal Recognition & Imagery', status: 'Active', desc: 'ML-based AMR, satellite imagery decoding, AI signal monitor' },
+  ]
+
+  return (
+    <div>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold mb-2">GROUNDLINK</h1>
+        <p className="text-sm sm:text-base text-gray-400">
+          LEO Satellite Communications — Test & Validation Platform
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <div className="text-sm text-gray-500">GOES-18 LRIT</div>
+          <div className="text-2xl font-bold text-emerald-400">+11.9 dB</div>
+          <div className="text-sm text-gray-500">Link Margin</div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <div className="text-sm text-gray-500">System Noise Temp</div>
+          <div className="text-2xl font-bold text-blue-400">105 K</div>
+          <div className="text-sm text-gray-500">SAWbird+ GOES + RTL-SDR</div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <div className="text-sm text-gray-500">Sessions Logged</div>
+          <div className="text-2xl font-bold text-amber-400">10</div>
+          <div className="text-sm text-gray-500">Mean error: 1.17 dB</div>
+        </div>
+      </div>
+
+      <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Project Phases</h2>
+      <div className="space-y-3">
+        {phases.map(phase => (
+          <div key={phase.num} className="bg-gray-900 rounded-lg p-3 sm:p-4 border border-gray-800 flex items-start sm:items-center gap-3 sm:gap-4">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gray-800 flex items-center justify-center text-xs sm:text-sm font-bold shrink-0">
+              {phase.num}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-sm sm:text-base">{phase.title}</span>
+                <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                  phase.status === 'Active' ? 'bg-emerald-900 text-emerald-300' : 'bg-gray-800 text-gray-400'
+                }`}>
+                  {phase.status}
+                </span>
+              </div>
+              <div className="text-xs sm:text-sm text-gray-500 mt-0.5">{phase.desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 sm:mt-8 bg-gray-900 rounded-lg p-4 border border-gray-800">
+        <h2 className="text-lg font-semibold mb-3">Hardware</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+          <div><span className="text-gray-500">Antenna:</span> DirecTV Slimline 5 (51x61 cm)</div>
+          <div><span className="text-gray-500">LNA:</span> Nooelec SAWbird+ GOES</div>
+          <div><span className="text-gray-500">SDR (RX):</span> RTL-SDR Blog V4</div>
+          <div><span className="text-gray-500">SDR (TX):</span> ADALM-Pluto</div>
+          <div><span className="text-gray-500">Total Cost:</span> ~$305</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <h2 className="text-lg font-semibold mb-3">Satellite Imagery</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <div><span className="text-gray-500">Satellites:</span> GOES-18, Meteor-M2-3, NOAA-19</div>
+            <div><span className="text-gray-500">Decoder:</span> SatDump CLI</div>
+            <div><span className="text-gray-500">Products:</span> LRIT, LRPT, APT imagery</div>
+            <div><span className="text-gray-500">Gallery:</span> 5 decoded images</div>
+          </div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+          <h2 className="text-lg font-semibold mb-3">Signal Monitor</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <div><span className="text-gray-500">ML Models:</span> VTCNN2, ResNet1D</div>
+            <div><span className="text-gray-500">Known Signals:</span> 8 cataloged</div>
+            <div><span className="text-gray-500">Bands:</span> VHF, UHF, L-band, S-band</div>
+            <div><span className="text-gray-500">Status:</span> AI classification active</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

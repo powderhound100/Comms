@@ -1,0 +1,291 @@
+"""GROUNDLINK SDR Agent — Host-side process manager.
+
+Lightweight HTTP server that runs on the Windows host alongside the
+RTL-SDR hardware.  The Docker-hosted Next.js dashboard calls this
+agent to start/stop SDR backends (radio, scanner, ADS-B) without
+needing to spawn processes inside the container.
+
+Usage:
+    python sdr_agent.py [--port 8780]
+
+API:
+    GET  /api/sdr          → { active_mode, pid, uptime_s, log }
+    POST /api/sdr/start    → { mode: "radio"|"scanner"|"adsb", config: {...} }
+    POST /api/sdr/stop     → {}
+"""
+
+import asyncio
+import json
+import logging
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from aiohttp import web
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("sdr-agent")
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
+MAX_LOG_LINES = 80
+
+
+class SdrProcessManager:
+    """Manages one SDR backend process at a time."""
+
+    def __init__(self):
+        self.proc: asyncio.subprocess.Process | None = None
+        self.mode: str | None = None
+        self.started_at: float | None = None
+        self.log: list[str] = []
+        self._log_tasks: list[asyncio.Task] = []
+
+    def _push_log(self, line: str):
+        self.log.append(line)
+        if len(self.log) > MAX_LOG_LINES:
+            self.log = self.log[-MAX_LOG_LINES:]
+
+    def is_running(self) -> bool:
+        return self.proc is not None and self.proc.returncode is None
+
+    def status(self) -> dict:
+        return {
+            "active_mode": self.mode if self.is_running() else None,
+            "pid": self.proc.pid if self.is_running() else None,
+            "uptime_s": int(time.time() - self.started_at) if self.is_running() and self.started_at else 0,
+            "log": self.log[-40:],
+        }
+
+    async def stop(self) -> dict:
+        was_mode = self.mode
+        if not self.is_running():
+            self.proc = None
+            self.mode = None
+            self.started_at = None
+            return {"ok": True, "stopped": was_mode}
+
+        pid = self.proc.pid
+        self._push_log(f"Stopping {was_mode} (PID {pid})...")
+
+        # Cancel log reader tasks
+        for t in self._log_tasks:
+            t.cancel()
+        self._log_tasks.clear()
+
+        # Kill process tree on Windows
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, timeout=5,
+                )
+            else:
+                self.proc.terminate()
+        except Exception as e:
+            self._push_log(f"Kill error: {e}")
+
+        # Wait for exit
+        try:
+            await asyncio.wait_for(self.proc.wait(), timeout=3.0)
+        except asyncio.TimeoutError:
+            try:
+                self.proc.kill()
+                await self.proc.wait()
+            except Exception:
+                pass
+
+        self._push_log(f"{was_mode} stopped.")
+        self.proc = None
+        self.mode = None
+        self.started_at = None
+        return {"ok": True, "stopped": was_mode}
+
+    async def start(self, mode: str, config: dict) -> dict:
+        # Stop current if running
+        if self.is_running():
+            if self.mode == mode:
+                return {"ok": True, "message": f"{mode} already running", "pid": self.proc.pid}
+            self._push_log(f"Switching from {self.mode} to {mode}...")
+            await self.stop()
+            # Let RTL-SDR device release
+            await asyncio.sleep(0.8)
+
+        self.log = []
+        env = os.environ.copy()
+        if RTLSDR_DIR not in env.get("PATH", ""):
+            env["PATH"] = RTLSDR_DIR + ";" + env.get("PATH", "")
+
+        cmd = self._build_command(mode, config)
+        self._push_log(f"Starting {mode}: {' '.join(cmd)}")
+
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(SCRIPT_DIR),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except Exception as e:
+            self._push_log(f"Spawn failed: {e}")
+            return {"ok": False, "message": str(e)}
+
+        self.mode = mode
+        self.started_at = time.time()
+
+        # Background log readers
+        self._log_tasks = [
+            asyncio.create_task(self._read_stream(self.proc.stdout, "out")),
+            asyncio.create_task(self._read_stream(self.proc.stderr, "log")),
+            asyncio.create_task(self._watch_exit()),
+        ]
+
+        # Give it a moment to fail
+        await asyncio.sleep(0.6)
+
+        if self.is_running():
+            return {"ok": True, "message": f"{mode} started", "pid": self.proc.pid}
+        else:
+            self.mode = None
+            self.started_at = None
+            return {"ok": False, "message": f"{mode} exited immediately — check log"}
+
+    def _build_command(self, mode: str, config: dict) -> list[str]:
+        if mode == "radio":
+            return [
+                sys.executable,
+                str(SCRIPT_DIR / "radio_server.py"),
+                "--port", str(config.get("port", 8770)),
+                "--freq", str(config.get("freq", 94.9)),
+                "--mode", config.get("mode", "wfm"),
+            ]
+        elif mode == "scanner":
+            cmd = [sys.executable, str(SCRIPT_DIR / "scanner.py")]
+            if config.get("mock"):
+                cmd.append("--mock")
+            if config.get("mode"):
+                cmd.extend(["--mode", config["mode"]])
+            if config.get("start_freq"):
+                cmd.extend(["--start-freq", str(config["start_freq"])])
+            if config.get("stop_freq"):
+                cmd.extend(["--stop-freq", str(config["stop_freq"])])
+            if config.get("watch_freq"):
+                cmd.extend(["--watch-freq", str(config["watch_freq"])])
+            return cmd
+        elif mode == "adsb":
+            cmd = [
+                sys.executable,
+                str(SCRIPT_DIR / "adsb_server.py"),
+                "--port", str(config.get("port", 8771)),
+                "--gain", str(config.get("gain", 496)),
+                "--device", str(config.get("device", 0)),
+            ]
+            if config.get("test"):
+                cmd.append("--test")
+            return cmd
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+    async def _read_stream(self, stream, prefix: str):
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                self._push_log(f"[{prefix}] {line.decode('utf-8', errors='replace').rstrip()}")
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    async def _watch_exit(self):
+        try:
+            code = await self.proc.wait()
+            self._push_log(f"{self.mode} exited (code {code})")
+            self.proc = None
+            self.mode = None
+            self.started_at = None
+        except asyncio.CancelledError:
+            pass
+
+
+# ── HTTP handlers ──
+
+manager = SdrProcessManager()
+
+
+async def handle_status(request: web.Request) -> web.Response:
+    return web.json_response(manager.status())
+
+
+async def handle_start(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    mode = body.get("mode")
+    if mode not in ("radio", "scanner", "adsb"):
+        return web.json_response(
+            {"ok": False, "error": f"Invalid mode: {mode}. Use: radio, scanner, adsb"},
+            status=400,
+        )
+
+    config = body.get("config", {})
+    result = await manager.start(mode, config)
+    result.update(manager.status())
+    return web.json_response(result, status=200 if result["ok"] else 500)
+
+
+async def handle_stop(request: web.Request) -> web.Response:
+    result = await manager.stop()
+    result.update(manager.status())
+    return web.json_response(result)
+
+
+def build_app() -> web.Application:
+    app = web.Application()
+    # CORS middleware for Docker → host requests
+    @web.middleware
+    async def cors(request: web.Request, handler):
+        if request.method == "OPTIONS":
+            resp = web.Response()
+        else:
+            resp = await handler(request)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return resp
+
+    app.middlewares.append(cors)
+    app.router.add_get("/api/sdr", handle_status)
+    app.router.add_post("/api/sdr/start", handle_start)
+    app.router.add_post("/api/sdr/stop", handle_stop)
+    return app
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="GROUNDLINK SDR Agent")
+    parser.add_argument("--port", type=int, default=8780, help="HTTP port (default: 8780)")
+    args = parser.parse_args()
+
+    logger.info("=" * 50)
+    logger.info("GROUNDLINK SDR Agent")
+    logger.info("Listening on http://0.0.0.0:%d", args.port)
+    logger.info("Manages: radio_server.py, scanner.py, adsb_server.py")
+    logger.info("=" * 50)
+
+    web.run_app(build_app(), host="0.0.0.0", port=args.port, print=None)
+
+
+if __name__ == "__main__":
+    main()

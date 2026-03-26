@@ -1,0 +1,15 @@
+tunnel: d80880cb-2cd3-49b1-843e-b023e7bf80bc
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: groundlink.powderhound420.com
+    service: http://groundlink-dashboard:3001
+  - hostname: scanner.powderhound420.com
+    service: http://host.docker.internal:8765
+  - hostname: scanner-api.powderhound420.com
+    service: http://host.docker.internal:8766
+  - hostname: radio.powderhound420.com
+    service: http://host.docker.internal:8770
+  - hostname: adsb.powderhound420.com
+    service: http://host.docker.internal:8771
+  - service: http_status:404

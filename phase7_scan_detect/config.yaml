@@ -1,0 +1,66 @@
+sdr:
+  device_index: 0
+  sample_rate: 2400000       # 2.4 Msps
+  gain: 40                   # dB, or "auto"
+  freq_correction_ppm: 0
+  direct_sampling: false
+
+scan:
+  mode: sweep                # sweep | watch | band_list
+  start_freq_mhz: 24        # RTL-SDR range start
+  stop_freq_mhz: 1766       # RTL-SDR range end
+  dwell_time_ms: 100
+  samples_per_step: 262144   # 256k samples per dwell
+  bands:                     # For band_list mode
+    - name: FM Broadcast
+      start_mhz: 87.5
+      stop_mhz: 108
+    - name: VHF Aviation
+      start_mhz: 118
+      stop_mhz: 137
+    - name: NOAA Weather
+      center_mhz: 162.475
+      span_mhz: 1
+    - name: 2m Amateur
+      start_mhz: 144
+      stop_mhz: 148
+    - name: ADS-B
+      center_mhz: 1090
+      span_mhz: 4
+    - name: GOES LRIT
+      center_mhz: 1694.1
+      span_mhz: 2
+
+detection:
+  threshold_db: 10           # dB above noise floor
+  min_bandwidth_hz: 5000     # Minimum 5 kHz signal width
+  fft_size: 1024
+  overlap: 0.5
+  cfar_enabled: false
+  cfar_guard_cells: 4
+  cfar_reference_cells: 16
+
+classification:
+  enabled: true
+  model: vtcnn2              # vtcnn2 | resnet1d
+  checkpoint: null           # null = auto-detect from phase6
+  min_snr_db: 5              # Only classify if SNR > this
+  top_k: 3
+
+demodulation:
+  enabled: true
+  audio_output_dir: output/audio
+  max_duration_sec: 10
+
+websocket:
+  host: "0.0.0.0"
+  port: 8765
+  spectrum_decimation: 4
+
+http:
+  host: "0.0.0.0"
+  port: 8766
+
+logging:
+  db_path: db/scanner.db
+  console_level: INFO
