@@ -4,6 +4,11 @@
 
 **GROUNDLINK** is a 7-phase SDR-based platform covering end-to-end RF engineering: link budget analysis, real satellite reception, CCSDS waveform design, encrypted over-the-air loopback, deep learning signal classification, multi-protocol decoding, and a live web dashboard.
 
+<p align="center">
+  <img src="docs/screenshots/adsb-tracker.png" alt="ADS-B Aircraft Tracker — live Mode S decoding at 1090 MHz with Leaflet map, spectrum display, and tracked aircraft table" width="100%">
+</p>
+<p align="center"><em>ADS-B Aircraft Tracker — live Mode S decoding at 1090 MHz with aircraft map, spectrum, and tracking table</em></p>
+
 ---
 
 ## What Makes This Different
@@ -30,6 +35,13 @@ POST /api/sdr/start   →  { mode: "radio" | "scanner" | "adsb", config: {...} }
 POST /api/sdr/stop    →  {}
 GET  /api/sdr         →  { active_mode, pid, uptime_s, log }
 ```
+
+---
+
+<p align="center">
+  <img src="docs/screenshots/radio-receiver.png" alt="Radio Receiver — live FM tuned to KEXP 90.3 MHz with spectrum analyzer, waterfall spectrogram, and station presets" width="100%">
+</p>
+<p align="center"><em>Radio Receiver — live WFM tuned to KEXP 90.3 with spectrum analyzer, waterfall, and station presets</em></p>
 
 ---
 
