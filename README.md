@@ -118,6 +118,11 @@ The protocol decoder automatically identifies and extracts data from detected si
 | **7** | **Scan & Detect** | Wideband scanner, SDR switching agent, ADS-B tracker, protocol decoders, known signal catalog |
 
 <p align="center">
+  <img src="docs/screenshots/link-budget.png" alt="Interactive Link Budget Calculator — GOES-18 LRIT preset with real-time EIRP, path loss, G/T, C/N₀, and link margin computation" width="100%">
+</p>
+<p align="center"><em>Interactive Link Budget Calculator — GOES-18 LRIT preset showing +11.5 dB link margin with full RF chain breakdown</em></p>
+
+<p align="center">
   <img src="docs/screenshots/ber-curves.png" alt="BER & Constellation Viewer — BPSK simulation vs OTA measurements with coding gain and implementation loss metrics" width="100%">
 </p>
 <p align="center"><em>BER vs Eb/N₀ — Phase 3 simulation and Phase 4 OTA measurements with ~5 dB coding gain and < 1.5 dB implementation loss</em></p>
