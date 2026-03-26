@@ -67,21 +67,19 @@ SIGNAL_CATALOG: list[KnownSignal] = [
     # Pager
     KnownSignal("POCSAG Pager", 152.48, 25, None, "POCSAG paging system"),
 
-    # Public Safety / Emergency — Seattle / King County
-    KnownSignal("Seattle PD Dispatch", 460.125, 12.5, "NFM", "Seattle Police dispatch"),
-    KnownSignal("Seattle PD Tac", 460.325, 12.5, "NFM", "Seattle Police tactical"),
-    KnownSignal("Seattle Fire Dispatch", 460.575, 12.5, "NFM", "Seattle Fire dispatch"),
-    KnownSignal("King Co Sheriff", 460.475, 12.5, "NFM", "King County Sheriff dispatch"),
-    KnownSignal("Medic One", 462.975, 12.5, "NFM", "King County EMS / Medic One"),
-    KnownSignal("WA State Patrol", 155.505, 25, "NFM", "Washington State Patrol"),
+    # Public Safety / Emergency — analog frequencies still active
+    KnownSignal("WA SAR", 155.16, 12.5, "NFM", "WA state search & rescue coordination"),
+    KnownSignal("LE Mutual Aid", 155.475, 12.5, "NFM", "National law enforcement mutual aid"),
     KnownSignal("MURS Ch1", 151.82, 12.5, "NFM", "Multi-Use Radio Service ch1"),
     KnownSignal("FRS/GMRS Ch1", 462.5625, 12.5, "NFM", "FRS/GMRS family radio ch1"),
     KnownSignal("NOAA EAS", 162.475, 25, "WBFM", "Emergency Alert System (NWR)"),
 
-    # Trunking
-    KnownSignal("P25 Control", 851.0, 12.5, None, "P25 trunked radio control channel"),
-    KnownSignal("P25 King Co", 851.025, 12.5, None, "King County P25 trunked system"),
-    KnownSignal("P25 Seattle", 851.2125, 12.5, None, "Seattle P25 trunked system"),
+    # KCERS P25 Phase II Trunked — digital, no analog audio
+    KnownSignal("KCERS Control", 851.0125, 12.5, "P25", "King County P25 trunked control channel"),
+    KnownSignal("KCERS SPD", 851.0625, 12.5, "P25", "Seattle Police P25 trunked"),
+    KnownSignal("KCERS SFD", 851.3125, 12.5, "P25", "Seattle Fire P25 trunked"),
+    KnownSignal("KCERS KCSO", 851.5125, 12.5, "P25", "King County Sheriff P25 trunked"),
+    KnownSignal("KCERS EMS", 852.0125, 12.5, "P25", "King County EMS P25 trunked"),
 
     # Railroad
     KnownSignal("Railroad AAR", 160.215, 12.5, "NFM", "AAR railroad channel 1"),

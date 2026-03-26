@@ -13,6 +13,7 @@ interface Preset {
   freq: number // Hz
   mode: 'wfm' | 'nfm' | 'am'
   sub?: string
+  digital?: boolean
 }
 
 interface PresetGroup {
@@ -62,11 +63,25 @@ const PRESET_GROUPS: PresetGroup[] = [
     name: 'Emergency',
     color: 'red',
     presets: [
-      { label: 'SPD Dispatch', freq: 460.125e6, mode: 'nfm', sub: 'Seattle PD' },
-      { label: 'SFD Dispatch', freq: 460.575e6, mode: 'nfm', sub: 'Seattle Fire' },
-      { label: 'King Co SO', freq: 460.475e6, mode: 'nfm', sub: 'Sheriff' },
-      { label: 'Medic One', freq: 462.975e6, mode: 'nfm', sub: 'EMS' },
-      { label: 'WA Patrol', freq: 155.505e6, mode: 'nfm', sub: 'State Patrol' },
+      { label: 'NOAA EAS', freq: 162.475e6, mode: 'nfm', sub: 'Emergency Alerts' },
+      { label: 'Guard 121.5', freq: 121.5e6, mode: 'am', sub: 'Aviation Emergency' },
+      { label: 'Marine Ch16', freq: 156.8e6, mode: 'nfm', sub: 'Maritime Distress' },
+      { label: 'WA SAR', freq: 155.16e6, mode: 'nfm', sub: 'Search & Rescue' },
+      { label: 'Mutual Aid', freq: 155.475e6, mode: 'nfm', sub: 'Law Enforcement' },
+      { label: 'FRS/GMRS 1', freq: 462.5625e6, mode: 'nfm', sub: 'Family Radio' },
+      { label: 'RR Emergency', freq: 161.565e6, mode: 'nfm', sub: 'Railroad Emerg' },
+      { label: 'MURS Ch1', freq: 151.82e6, mode: 'nfm', sub: 'Multi-Use Radio' },
+    ],
+  },
+  {
+    name: 'P25 Digital (KCERS)',
+    color: 'orange',
+    presets: [
+      { label: 'KCERS Control', freq: 851.0125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
+      { label: 'SPD Trunked', freq: 851.0625e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
+      { label: 'SFD Trunked', freq: 851.3125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
+      { label: 'KCSO Trunked', freq: 851.5125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
+      { label: 'EMS Trunked', freq: 852.0125e6, mode: 'nfm', sub: 'Digital — spectrum only', digital: true },
     ],
   },
   {
@@ -110,6 +125,7 @@ const colorMap: Record<string, { bg: string; text: string; border: string; ring:
   red:     { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30', ring: 'ring-red-500/40', dot: 'bg-red-400' },
   blue:    { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/30', ring: 'ring-blue-500/40', dot: 'bg-blue-400' },
   violet:  { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/30', ring: 'ring-violet-500/40', dot: 'bg-violet-400' },
+  orange:  { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/30', ring: 'ring-orange-500/40', dot: 'bg-orange-400' },
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -363,6 +379,11 @@ export default function RadioPage() {
     }
   }
 
+  // Check if tuned to a digital (P25) frequency
+  const isDigitalFreq = PRESET_GROUPS.some(g =>
+    g.presets.some(p => p.digital && Math.abs(freq - p.freq) < 1e4)
+  )
+
   // Signal strength meter
   const sigPct = Math.max(0, Math.min(100, ((signalStrength + 90) / 60) * 100))
   const sigColor = sigPct > 60 ? 'bg-emerald-400' : sigPct > 30 ? 'bg-amber-400' : 'bg-red-400'
@@ -431,6 +452,18 @@ export default function RadioPage() {
                   style={{ width: `${bufferPct}%` }}
                 />
               </div>
+            </div>
+          )}
+
+          {/* P25 digital signal warning */}
+          {isDigitalFreq && playing && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2">
+              <svg className="w-4 h-4 text-orange-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+              </svg>
+              <span className="text-xs text-orange-400">
+                P25 Digital Signal — spectrum visible but audio requires P25 vocoder
+              </span>
             </div>
           )}
         </div>
@@ -593,8 +626,13 @@ export default function RadioPage() {
                           : 'border-gray-800 hover:border-gray-700 bg-gray-800/30 hover:bg-gray-800/60'
                       }`}
                     >
-                      <div className={`text-xs font-semibold ${isActive ? c.text : 'text-gray-300'}`}>
+                      <div className={`text-xs font-semibold ${isActive ? c.text : 'text-gray-300'} flex items-center gap-1`}>
                         {p.label}
+                        {p.digital && (
+                          <span className="text-[8px] px-1 py-0.5 rounded bg-orange-500/20 border border-orange-500/30 text-orange-400 font-mono leading-none">
+                            DIGITAL
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] font-mono text-gray-500">
                         {(p.freq / 1e6).toFixed(3)} {modeLabel(p.mode)}
