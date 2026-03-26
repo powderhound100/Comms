@@ -18,8 +18,10 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import struct
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -37,6 +39,123 @@ ADSB_EXE = str(SCRIPT_DIR / "groundlink_adsb.exe")
 
 # RTL-SDR DLL directory — needed at runtime
 RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
+
+# Aircraft log database
+DB_PATH = SCRIPT_DIR / "db" / "aircraft.db"
+
+
+class AircraftLog:
+    """SQLite logger for ADS-B aircraft sightings with deduplication."""
+
+    def __init__(self, db_path: Path = DB_PATH):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(db_path))
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self._create_tables()
+        logger.info("Aircraft log: %s", db_path)
+
+    def _create_tables(self):
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS aircraft (
+                icao        TEXT PRIMARY KEY,
+                callsign    TEXT,
+                first_seen  TEXT NOT NULL,
+                last_seen   TEXT NOT NULL,
+                total_msgs  INTEGER DEFAULT 0,
+                sessions    INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS sightings (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                icao        TEXT NOT NULL,
+                callsign    TEXT,
+                lat         REAL,
+                lon         REAL,
+                alt_ft      INTEGER,
+                gs_kt       REAL,
+                hdg         REAL,
+                vr_fpm      INTEGER,
+                on_ground   INTEGER,
+                ts          TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sightings_icao ON sightings(icao);
+            CREATE INDEX IF NOT EXISTS idx_sightings_ts   ON sightings(ts);
+        """)
+        self.conn.commit()
+
+    def log_aircraft(self, ac_list: list[dict]):
+        """Log a batch of aircraft from one 'D' frame. Deduplicates by
+        only inserting a sighting if position or callsign changed since
+        the last sighting for that ICAO."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        for ac in ac_list:
+            icao = ac.get("icao", "").upper()
+            if not icao:
+                continue
+
+            callsign = ac.get("callsign") or None
+            lat = ac.get("lat")
+            lon = ac.get("lon")
+            alt = ac.get("alt_ft")
+            gs = ac.get("gs_kt")
+            hdg = ac.get("hdg")
+            vr = ac.get("vr_fpm")
+            on_gnd = 1 if ac.get("on_ground") else 0
+            msgs = ac.get("msgs", 0)
+
+            # Upsert aircraft master record
+            row = self.conn.execute(
+                "SELECT callsign, total_msgs FROM aircraft WHERE icao = ?",
+                (icao,),
+            ).fetchone()
+
+            if row is None:
+                self.conn.execute(
+                    "INSERT INTO aircraft (icao, callsign, first_seen, last_seen, total_msgs, sessions) "
+                    "VALUES (?, ?, ?, ?, ?, 1)",
+                    (icao, callsign, now, now, msgs),
+                )
+            else:
+                cs = callsign if callsign else row[0]
+                self.conn.execute(
+                    "UPDATE aircraft SET callsign = ?, last_seen = ?, total_msgs = total_msgs + ? "
+                    "WHERE icao = ?",
+                    (cs, now, max(0, msgs - row[1]), icao),
+                )
+
+            # Deduplicate sightings: skip if last sighting has same position
+            if lat is not None and lon is not None:
+                last = self.conn.execute(
+                    "SELECT lat, lon, callsign FROM sightings "
+                    "WHERE icao = ? ORDER BY id DESC LIMIT 1",
+                    (icao,),
+                ).fetchone()
+
+                if last and last[0] == lat and last[1] == lon and last[2] == callsign:
+                    continue  # duplicate position, skip
+
+                self.conn.execute(
+                    "INSERT INTO sightings (icao, callsign, lat, lon, alt_ft, gs_kt, hdg, vr_fpm, on_ground, ts) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (icao, callsign, lat, lon, alt, gs, hdg, vr, on_gnd, now),
+                )
+
+        self.conn.commit()
+
+    def stats(self) -> dict:
+        total = self.conn.execute("SELECT COUNT(*) FROM aircraft").fetchone()[0]
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        today_count = self.conn.execute(
+            "SELECT COUNT(DISTINCT icao) FROM sightings WHERE ts >= ?",
+            (today + "T00:00:00Z",),
+        ).fetchone()[0]
+        sightings = self.conn.execute("SELECT COUNT(*) FROM sightings").fetchone()[0]
+        return {"unique_aircraft": total, "today": today_count, "total_sightings": sightings}
+
+    def close(self):
+        self.conn.close()
 
 
 class AdsbProcess:
@@ -126,7 +245,7 @@ async def broadcast(message: str):
     clients.difference_update(dead)
 
 
-async def frame_reader(adsb: AdsbProcess):
+async def frame_reader(adsb: AdsbProcess, ac_log: AircraftLog):
     """Read binary frames from the C process and broadcast to clients."""
     aircraft_count = 0
     spectrum_count = 0
@@ -155,6 +274,14 @@ async def frame_reader(adsb: AdsbProcess):
                         msg_rate = data.get('msg_rate', 0)
                         logger.info("Aircraft report #%d: %d tracked, %.1f msg/s",
                                     aircraft_count, ac_count, msg_rate)
+
+                    # Log to database
+                    ac_list = data.get("aircraft", [])
+                    if ac_list:
+                        try:
+                            ac_log.log_aircraft(ac_list)
+                        except Exception as e:
+                            logger.warning("DB log error: %s", e)
 
                     await broadcast(json.dumps({
                         "type": "aircraft",
@@ -252,10 +379,11 @@ def main(port, gain, device, test):
             logger.info("MODE: Test (synthetic messages)")
         logger.info("=" * 50)
 
+        ac_log = AircraftLog()
         await adsb.start()
 
         # Start frame reader in background
-        reader_task = asyncio.create_task(frame_reader(adsb))
+        reader_task = asyncio.create_task(frame_reader(adsb, ac_log))
 
         async with websockets.serve(ws_handler, "0.0.0.0", port):
             try:
@@ -265,6 +393,10 @@ def main(port, gain, device, test):
             finally:
                 reader_task.cancel()
                 await adsb.stop()
+                stats = ac_log.stats()
+                logger.info("Session stats: %d unique aircraft, %d sightings",
+                            stats["unique_aircraft"], stats["total_sightings"])
+                ac_log.close()
 
     try:
         asyncio.run(serve())
