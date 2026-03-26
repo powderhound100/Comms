@@ -5,54 +5,52 @@ import type { SignalChain } from './gnu-radio'
 export const radioChains: Record<string, SignalChain> = {
   wfm: {
     name: 'WFM Reception',
-    description: 'Wideband FM demodulation — broadcast radio at 200 kHz deviation.',
+    description: 'Wideband FM demodulation in C — decimate first, then demod on 10x fewer samples.',
     phase: 5,
     planned: false,
     blocks: [
       { label: 'Antenna', type: 'hardware' },
       { label: 'RTL-SDR', type: 'hardware' },
-      { label: 'Phase Diff', type: 'dsp' },
-      { label: 'Decimate ×50', type: 'dsp' },
+      { label: 'FIR + Decimate ×10 IQ', type: 'dsp' },
+      { label: 'Fast atan2 FM Demod', type: 'dsp' },
+      { label: 'Decimate ×5 Audio', type: 'dsp' },
       { label: 'De-emphasis 75μs', type: 'dsp' },
-      { label: 'Normalize', type: 'dsp' },
-      { label: 'Int16 PCM', type: 'decode' },
-      { label: 'WebSocket', type: 'app' },
+      { label: 'Normalize → Int16', type: 'decode' },
+      { label: 'Binary WebSocket', type: 'app' },
       { label: 'AudioWorklet', type: 'app' },
     ],
   },
   nfm: {
     name: 'NFM Reception',
-    description: 'Narrowband FM demodulation — public safety, marine, amateur at 5 kHz deviation.',
+    description: 'Narrowband FM in C — 3-stage IQ decimation (×50) then demod on ~5k samples.',
     phase: 5,
     planned: false,
     blocks: [
       { label: 'Antenna', type: 'hardware' },
       { label: 'RTL-SDR', type: 'hardware' },
-      { label: 'Phase Diff', type: 'dsp' },
-      { label: 'Butter LPF 5 kHz', type: 'dsp' },
-      { label: 'Decimate ×150', type: 'dsp' },
+      { label: 'FIR + Decimate ×50 IQ', type: 'dsp' },
+      { label: 'Fast atan2 FM Demod', type: 'dsp' },
+      { label: 'Decimate ×3 Audio', type: 'dsp' },
       { label: 'De-emphasis 50μs', type: 'dsp' },
-      { label: 'Normalize', type: 'dsp' },
-      { label: 'Int16 PCM', type: 'decode' },
-      { label: 'WebSocket', type: 'app' },
+      { label: 'Normalize → Int16', type: 'decode' },
+      { label: 'Binary WebSocket', type: 'app' },
       { label: 'AudioWorklet', type: 'app' },
     ],
   },
   am: {
     name: 'AM Reception',
-    description: 'Amplitude modulation envelope detection — aviation and shortwave.',
+    description: 'AM envelope detection in C — decimate IQ first, then sqrt(I²+Q²) on ~5k samples.',
     phase: 5,
     planned: false,
     blocks: [
       { label: 'Antenna', type: 'hardware' },
       { label: 'RTL-SDR', type: 'hardware' },
-      { label: 'Envelope |IQ|', type: 'dsp' },
+      { label: 'FIR + Decimate ×50 IQ', type: 'dsp' },
+      { label: 'Envelope √(I²+Q²)', type: 'dsp' },
       { label: 'DC Remove', type: 'dsp' },
-      { label: 'Butter BPF 300–3.4k', type: 'dsp' },
-      { label: 'Decimate ×150', type: 'dsp' },
-      { label: 'Normalize', type: 'dsp' },
-      { label: 'Int16 PCM', type: 'decode' },
-      { label: 'WebSocket', type: 'app' },
+      { label: 'Decimate ×3 Audio', type: 'dsp' },
+      { label: 'Normalize → Int16', type: 'decode' },
+      { label: 'Binary WebSocket', type: 'app' },
       { label: 'AudioWorklet', type: 'app' },
     ],
   },
@@ -62,16 +60,16 @@ export const radioChains: Record<string, SignalChain> = {
 
 export const spectrumChain: SignalChain = {
   name: 'Spectrum Analysis',
-  description: 'Power spectral density computed server-side and rendered on a canvas overlay.',
+  description: 'Inline radix-2 FFT in C on raw 2.4 MHz IQ, output every 3rd capture (~330ms).',
   phase: 5,
   planned: false,
   blocks: [
-    { label: 'IQ Samples', type: 'hardware' },
-    { label: 'Welch PSD 1024', type: 'dsp' },
-    { label: 'dB Scale', type: 'dsp' },
-    { label: 'DC-Center', type: 'dsp' },
-    { label: 'JSON', type: 'decode' },
-    { label: 'WebSocket', type: 'app' },
+    { label: 'Raw IQ 2.4M', type: 'hardware' },
+    { label: 'Hann Window', type: 'dsp' },
+    { label: 'Radix-2 FFT 1024', type: 'dsp' },
+    { label: 'Mag² → dBFS', type: 'dsp' },
+    { label: '4× Bin Avg → 256', type: 'dsp' },
+    { label: 'JSON WebSocket', type: 'app' },
     { label: 'Canvas', type: 'app' },
   ],
 }
@@ -92,26 +90,26 @@ export const radioModes: RadioMode[] = [
   {
     key: 'wfm',
     label: 'WFM',
-    demod: 'Phase differentiation',
-    filter: 'None (wideband)',
+    demod: 'Fast atan2 (C)',
+    filter: 'FIR LPF → ×10 IQ decim',
     outputRate: '48 kHz',
-    deEmphasis: '75 μs (North America)',
+    deEmphasis: '75 μs IIR (North America)',
     typicalUse: 'FM broadcast radio',
   },
   {
     key: 'nfm',
     label: 'NFM',
-    demod: 'Phase differentiation',
-    filter: 'Butterworth LPF 5 kHz',
+    demod: 'Fast atan2 (C)',
+    filter: 'FIR LPF → ×50 IQ decim (3-stage)',
     outputRate: '16 kHz',
-    deEmphasis: '50 μs',
+    deEmphasis: '50 μs IIR',
     typicalUse: 'Public safety, marine, amateur',
   },
   {
     key: 'am',
     label: 'AM',
-    demod: 'Envelope |IQ|',
-    filter: 'Butterworth BPF 300–3400 Hz',
+    demod: 'Envelope √(I²+Q²) (C)',
+    filter: 'FIR LPF → ×50 IQ decim (3-stage)',
     outputRate: '16 kHz',
     deEmphasis: 'None',
     typicalUse: 'Aviation, shortwave, AM broadcast',
@@ -121,13 +119,14 @@ export const radioModes: RadioMode[] = [
 // ── Audio transport protocol ──
 
 export const audioTransport: { label: string; value: string }[] = [
-  { label: 'Protocol', value: 'WebSocket (binary frames)' },
-  { label: 'Frame Header', value: '1 B mode + 4 B sampleRate (LE uint32)' },
-  { label: 'Payload', value: 'Int16 PCM samples' },
-  { label: 'Chunk Size', value: '~437 ms per frame' },
+  { label: 'DSP Engine', value: 'groundlink_radio.exe (custom C, ~400 lines)' },
+  { label: 'Audio Protocol', value: 'Binary WebSocket — raw int16 PCM (no base64)' },
+  { label: 'Frame Format', value: "'A' tag + uint32 length + uint32 sampleRate + int16[]" },
+  { label: 'Chunk Size', value: '~109 ms capture → <15 ms demod (well under real-time)' },
   { label: 'Jitter Buffer', value: '5 chunks (~100 ms) before playback' },
   { label: 'Playback', value: 'AudioWorklet ring buffer → speakers' },
-  { label: 'Spectrum', value: 'JSON text frames (PSD dBFS array)' },
+  { label: 'Spectrum', value: "JSON text frames — 256 dBFS bins every ~330 ms" },
+  { label: 'Retune', value: 'Kill + restart C process with new --freq (< 200 ms)' },
 ]
 
 // ── DSP concepts glossary ──
@@ -139,33 +138,38 @@ export interface DSPConcept {
 
 export const dspConcepts: DSPConcept[] = [
   {
-    term: 'Phase Differentiation',
+    term: 'Decimate-First Architecture',
     description:
-      'FM demodulation by computing the instantaneous frequency as the derivative of the signal phase. Each IQ sample\'s phase is compared to the previous sample — the difference is proportional to the modulating audio.',
+      'The key optimization: narrow the IQ to channel bandwidth BEFORE demodulation. WFM decimates 262k IQ samples to 26k (×10), so the expensive atan2 runs on 10x fewer samples. NFM/AM decimate ×50 to ~5k samples.',
   },
   {
-    term: 'De-emphasis',
+    term: 'Fast atan2 Approximation',
     description:
-      'A low-pass filter that reverses the pre-emphasis applied at the transmitter. FM broadcast uses a 75 μs time constant in North America (50 μs elsewhere), restoring flat audio response.',
+      'A polynomial approximation of atan2 (~50 CPU cycles vs ~500 for libm atan2f). Uses the identity atan2(y,x) ≈ π/4 + polynomial correction based on the ratio (x−|y|)/(x+|y|). From rtl_fm, accurate to ~0.07°.',
+  },
+  {
+    term: 'FIR Low-Pass + Decimation',
+    description:
+      'A 16-tap FIR filter (windowed sinc × Hamming) anti-aliases before downsampling. Each decimation stage filters to half the new Nyquist frequency, then keeps every Nth sample. Cascaded stages keep each factor small.',
+  },
+  {
+    term: 'De-emphasis IIR',
+    description:
+      'Single-pole IIR filter: y[n] = y[n-1] + α·(x[n] - y[n-1]). Reverses the pre-emphasis applied at the transmitter. FM broadcast uses τ = 75 μs (North America), NFM uses 50 μs. α = 1 - e^(-1/(fs·τ)).',
   },
   {
     term: 'Envelope Detection',
     description:
-      'AM demodulation by computing the magnitude of each IQ sample: √(I² + Q²). The envelope tracks the amplitude variations that carry the audio content.',
+      'AM demodulation by computing the magnitude of each IQ sample: √(I² + Q²). After IQ decimation to channel bandwidth, the envelope tracks the amplitude variations that carry the audio content.',
   },
   {
-    term: 'Welch PSD',
+    term: 'Radix-2 FFT',
     description:
-      'Power Spectral Density estimation using overlapping, windowed FFT segments averaged together. Produces a smoother spectrum display than a single FFT, reducing noise variance at the cost of frequency resolution.',
+      'In-place Cooley-Tukey FFT on 1024 complex IQ samples. Hann-windowed, then bit-reversal + butterfly stages. Output bins averaged 4× to 256 points, converted to dBFS for spectrum display.',
   },
   {
     term: 'Jitter Buffer',
     description:
-      'A small FIFO buffer (5 chunks ≈ 100 ms) that absorbs network timing variations before audio playback begins. Trades a fixed startup latency for continuous, gap-free audio output.',
-  },
-  {
-    term: 'Butterworth Filter',
-    description:
-      'A maximally-flat magnitude response filter with no ripple in the passband. Used here as a low-pass (NFM) or band-pass (AM) to limit audio bandwidth before decimation.',
+      'A small FIFO buffer (5 chunks ≈ 100 ms) in the AudioWorklet that absorbs network timing variations before audio playback begins. Trades a fixed startup latency for continuous, gap-free audio output.',
   },
 ]

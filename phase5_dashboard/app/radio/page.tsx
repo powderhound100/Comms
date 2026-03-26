@@ -305,9 +305,10 @@ export default function RadioPage() {
       }
     }
 
-    // Connect WebSocket (JSON text frames)
+    // Connect WebSocket (binary audio + JSON spectrum)
     const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
     const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
@@ -315,23 +316,27 @@ export default function RadioPage() {
     ws.onerror = () => { /* will trigger onclose */ }
 
     ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'audio' && data.samples) {
-          if (actx.state === 'suspended') actx.resume()
-          // Decode base64 float32 → push to AudioWorklet
-          const raw = atob(data.samples)
-          const bytes = new Uint8Array(raw.length)
-          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-          const floats = new Float32Array(bytes.buffer)
-          workletNode.port.postMessage({ type: 'audio', samples: floats })
-        } else if (data.type === 'spectrum') {
-          setPsdData(data.psd_dbfs)
-          if (data.psd_dbfs?.length) {
-            setSignalStrength(Math.max(...data.psd_dbfs))
-          }
+      if (event.data instanceof ArrayBuffer) {
+        // Binary frame — int16 PCM audio from C demodulator
+        if (actx.state === 'suspended') actx.resume()
+        const int16 = new Int16Array(event.data)
+        const float32 = new Float32Array(int16.length)
+        for (let i = 0; i < int16.length; i++) {
+          float32[i] = int16[i] / 32768.0
         }
-      } catch { /* skip non-JSON */ }
+        workletNode.port.postMessage({ type: 'audio', samples: float32 })
+      } else {
+        // Text frame — spectrum JSON
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'spectrum') {
+            setPsdData(data.psd_dbfs)
+            if (data.psd_dbfs?.length) {
+              setSignalStrength(Math.max(...data.psd_dbfs))
+            }
+          }
+        } catch { /* skip malformed JSON */ }
+      }
     }
   }, [playing, freq, mode, volume])
 
@@ -630,10 +635,11 @@ export default function RadioPage() {
           <p className="text-sm text-gray-400">
             A software-defined radio replaces traditional analog filter and demodulator hardware
             with digital signal processing in software. The RTL-SDR digitises a slice of RF
-            spectrum as IQ (in-phase / quadrature) samples at 2.4 Msps. A Python backend performs
-            demodulation — phase differentiation for FM, envelope detection for AM — then decimates
-            and streams the resulting audio as base64 JSON over WebSocket to the browser, where an
-            AudioWorklet ring buffer plays it back with gapless scheduling.
+            spectrum as IQ (in-phase / quadrature) samples at 2.4 Msps. A custom C demodulator
+            decimates the IQ first (narrowing to channel bandwidth), then demodulates using fast
+            atan2 approximation for FM or envelope detection for AM — processing 10x fewer samples
+            than a naive approach. Audio streams as raw int16 PCM over WebSocket to the browser,
+            where an AudioWorklet ring buffer plays it back with gapless scheduling.
           </p>
         </div>
 
