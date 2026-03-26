@@ -8,4 +8,6 @@ ingress:
     service: http://host.docker.internal:8765
   - hostname: scanner-api.powderhound420.com
     service: http://host.docker.internal:8766
+  - hostname: radio.powderhound420.com
+    service: http://host.docker.internal:8770
   - service: http_status:404

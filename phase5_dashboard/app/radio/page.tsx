@@ -325,7 +325,11 @@ export default function RadioPage() {
     }
 
     // Connect WebSocket (binary audio + JSON spectrum)
-    const wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
+    // On localhost, connect directly to radio backend; on production, go through Cloudflare tunnel
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    const wsUrl = isLocal
+      ? `ws://localhost:8770?freq=${freq}&mode=${mode}`
+      : `wss://radio.powderhound420.com?freq=${freq}&mode=${mode}`
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
