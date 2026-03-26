@@ -178,18 +178,28 @@ static void make_lowpass_fir(float *h, int taps, float cutoff) {
 }
 
 /* ── Decimate complex IQ: FIR low-pass + downsample ────────── */
+/* hist_i/hist_q: tail of previous block (FIR_TAPS samples) for continuity.
+   Pass NULL on first call; the function uses zeros for missing history. */
 
 static int decimate_iq(const float *in_i, const float *in_q, int n_in,
                        float *out_i, float *out_q,
-                       const float *fir, int fir_len, int factor) {
+                       const float *fir, int fir_len, int factor,
+                       const float *hist_i, const float *hist_q) {
     int n_out = 0;
     for (int i = 0; i < n_in; i += factor) {
         float si = 0.0f, sq = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
-            if (idx >= 0 && idx < n_in) {
+            if (idx >= 0) {
                 si += fir[t] * in_i[idx];
                 sq += fir[t] * in_q[idx];
+            } else if (hist_i) {
+                /* Reach into previous block's tail */
+                int hi = fir_len + idx;  /* fir_len - t + i */
+                if (hi >= 0 && hi < fir_len) {
+                    si += fir[t] * hist_i[hi];
+                    sq += fir[t] * hist_q[hi];
+                }
             }
         }
         out_i[n_out] = si;
@@ -203,14 +213,20 @@ static int decimate_iq(const float *in_i, const float *in_q, int n_in,
 
 static int decimate_real(const float *in, int n_in,
                          float *out,
-                         const float *fir, int fir_len, int factor) {
+                         const float *fir, int fir_len, int factor,
+                         const float *hist) {
     int n_out = 0;
     for (int i = 0; i < n_in; i += factor) {
         float s = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
-            if (idx >= 0 && idx < n_in) {
+            if (idx >= 0) {
                 s += fir[t] * in[idx];
+            } else if (hist) {
+                int hi = fir_len + idx;
+                if (hi >= 0 && hi < fir_len) {
+                    s += fir[t] * hist[hi];
+                }
             }
         }
         out[n_out++] = s;
@@ -384,6 +400,14 @@ int main(int argc, char **argv) {
     float am_dc = 0.0f;        /* IIR DC estimator */
     float agc_peak = 0.01f;    /* slow AGC envelope */
 
+    /* Squelch state (AM/NFM) */
+    float noise_floor = 0.05f; /* IIR noise floor estimator */
+    float squelch_gate = 0.0f; /* 0.0 = muted, 1.0 = open */
+
+    /* FIR filter history buffers — tail of previous block for continuity */
+    float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* raw IQ */
+    float hist_audio[FIR_TAPS] = {0};                              /* audio */
+
     int frame_count = 0;
 
     /* ── Main loop ── */
@@ -420,7 +444,14 @@ int main(int argc, char **argv) {
              */
             int n_dec = decimate_iq(iq_i, iq_q, n_iq,
                                     dec1_i, dec1_q,
-                                    fir_10, FIR_TAPS, 10);
+                                    fir_10, FIR_TAPS, 10,
+                                    hist_iq_i, hist_iq_q);
+
+            /* Save IQ history for next block */
+            if (n_iq >= FIR_TAPS) {
+                memcpy(hist_iq_i, iq_i + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq_q, iq_q + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* FM demod on decimated IQ */
             for (int i = 0; i < n_dec; i++) {
@@ -434,8 +465,14 @@ int main(int argc, char **argv) {
             /* Decimate audio: 240k → /5 → 48k */
             n_audio = decimate_real(audio, n_dec,
                                     audio_dec,
-                                    fir_audio5, FIR_TAPS, 5);
+                                    fir_audio5, FIR_TAPS, 5,
+                                    hist_audio);
             audio_rate = 48000;
+
+            /* Save audio history */
+            if (n_dec >= FIR_TAPS) {
+                memcpy(hist_audio, audio + n_dec - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* De-emphasis: 75 μs (North America WFM) */
             float alpha = 1.0f - expf(-1.0f / (48000.0f * 75e-6f));
@@ -448,13 +485,23 @@ int main(int argc, char **argv) {
              */
             int n1 = decimate_iq(iq_i, iq_q, n_iq,
                                  dec1_i, dec1_q,
-                                 fir_5, FIR_TAPS, 5);
+                                 fir_5, FIR_TAPS, 5,
+                                 hist_iq_i, hist_iq_q);
+
+            /* Save IQ history (from raw input) */
+            if (n_iq >= FIR_TAPS) {
+                memcpy(hist_iq_i, iq_i + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq_q, iq_q + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
-                                 fir_5, FIR_TAPS, 5);
+                                 fir_5, FIR_TAPS, 5,
+                                 NULL, NULL);
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
-                                 fir_2, FIR_TAPS, 2);
+                                 fir_2, FIR_TAPS, 2,
+                                 NULL, NULL);
 
             /* FM demod on 48k IQ */
             for (int i = 0; i < n3; i++) {
@@ -468,8 +515,13 @@ int main(int argc, char **argv) {
             /* Decimate audio: 48k → /3 → 16k */
             n_audio = decimate_real(audio, n3,
                                     audio_dec,
-                                    fir_audio3, FIR_TAPS, 3);
+                                    fir_audio3, FIR_TAPS, 3,
+                                    hist_audio);
             audio_rate = 16000;
+
+            if (n3 >= FIR_TAPS) {
+                memcpy(hist_audio, audio + n3 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* De-emphasis: 50 μs (NFM) */
             float alpha = 1.0f - expf(-1.0f / (16000.0f * 50e-6f));
@@ -482,28 +534,41 @@ int main(int argc, char **argv) {
              */
             int n1 = decimate_iq(iq_i, iq_q, n_iq,
                                  dec1_i, dec1_q,
-                                 fir_5, FIR_TAPS, 5);
+                                 fir_5, FIR_TAPS, 5,
+                                 hist_iq_i, hist_iq_q);
+
+            if (n_iq >= FIR_TAPS) {
+                memcpy(hist_iq_i, iq_i + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq_q, iq_q + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
-                                 fir_5, FIR_TAPS, 5);
+                                 fir_5, FIR_TAPS, 5,
+                                 NULL, NULL);
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
-                                 fir_2, FIR_TAPS, 2);
+                                 fir_2, FIR_TAPS, 2,
+                                 NULL, NULL);
 
             /* AM envelope detection with IIR DC removal (no block boundary clicks) */
-            /* DC alpha: ~20 Hz high-pass at 48 kHz → smooth DC tracking */
             float dc_alpha = 1.0f - expf(-2.0f * PI_F * 20.0f / 48000.0f);
             for (int i = 0; i < n3; i++) {
                 float mag = sqrtf(dec1_i[i] * dec1_i[i] + dec1_q[i] * dec1_q[i]);
-                am_dc += dc_alpha * (mag - am_dc);  /* track DC smoothly */
-                audio[i] = mag - am_dc;             /* remove DC */
+                am_dc += dc_alpha * (mag - am_dc);
+                audio[i] = mag - am_dc;
             }
 
             /* Decimate audio: 48k → /3 → 16k */
             n_audio = decimate_real(audio, n3,
                                     audio_dec,
-                                    fir_audio3, FIR_TAPS, 3);
+                                    fir_audio3, FIR_TAPS, 3,
+                                    hist_audio);
             audio_rate = 16000;
+
+            if (n3 >= FIR_TAPS) {
+                memcpy(hist_audio, audio + n3 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
         }
 
         /* ── Normalize + convert to int16 PCM ── */
@@ -514,21 +579,42 @@ int main(int argc, char **argv) {
         }
 
         float scale;
-        if (mode == MODE_AM) {
-            /* Slow AGC for AM: fast attack, slow release — no gain pumping */
+        if (mode == MODE_AM || mode == MODE_NFM) {
+            /* Slow AGC for AM/NFM: fast attack, slow release */
             if (block_peak > agc_peak) {
-                agc_peak += 0.3f * (block_peak - agc_peak);   /* fast attack */
+                agc_peak += 0.3f * (block_peak - agc_peak);
             } else {
-                agc_peak += 0.005f * (block_peak - agc_peak); /* slow release */
+                agc_peak += 0.005f * (block_peak - agc_peak);
             }
             scale = (agc_peak > 1e-6f) ? (0.6f * 32767.0f / agc_peak) : 32767.0f;
+
+            /* ── Squelch: mute when signal is near noise floor ── */
+            /* Track noise floor: very slow IIR that follows minimum levels */
+            if (block_peak < noise_floor) {
+                noise_floor += 0.1f * (block_peak - noise_floor);   /* drop fast */
+            } else {
+                noise_floor += 0.001f * (block_peak - noise_floor); /* rise very slow */
+            }
+
+            /* Signal is "open" when block_peak > 3x noise floor */
+            float squelch_ratio = (noise_floor > 1e-8f) ? (block_peak / noise_floor) : 1.0f;
+            if (squelch_ratio > 3.0f) {
+                /* Open squelch — fast open */
+                squelch_gate += 0.4f * (1.0f - squelch_gate);
+            } else {
+                /* Close squelch — smooth fade out */
+                squelch_gate *= 0.85f;
+            }
+            if (squelch_gate < 0.01f) squelch_gate = 0.0f;
+
         } else {
-            /* FM: per-block normalize is fine (continuous signal) */
+            /* WFM: per-block normalize, no squelch (continuous signal) */
             scale = (block_peak > 1e-6f) ? (0.9f * 32767.0f / block_peak) : 32767.0f;
+            squelch_gate = 1.0f;
         }
 
         for (int i = 0; i < n_audio; i++) {
-            float s = audio_dec[i] * scale;
+            float s = audio_dec[i] * scale * squelch_gate;
             if (s > 32767.0f) s = 32767.0f;
             if (s < -32768.0f) s = -32768.0f;
             pcm[i] = (int16_t)s;
