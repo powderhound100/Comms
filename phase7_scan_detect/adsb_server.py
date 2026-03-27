@@ -84,7 +84,14 @@ class AircraftLog:
         """)
         self.conn.commit()
 
-    def log_aircraft(self, ac_list: list[dict]):
+        # Migration: add source column for dual-frequency support
+        try:
+            self.conn.execute("ALTER TABLE sightings ADD COLUMN source TEXT DEFAULT '1090'")
+            self.conn.commit()
+        except Exception:
+            pass  # Column already exists
+
+    def log_aircraft(self, ac_list: list[dict], source: str = "1090"):
         """Log a batch of aircraft from one 'D' frame. Deduplicates by
         only inserting a sighting if position or callsign changed since
         the last sighting for that ICAO."""
@@ -143,9 +150,9 @@ class AircraftLog:
                         continue  # dedup: same position OR too recent
 
                 self.conn.execute(
-                    "INSERT INTO sightings (icao, callsign, lat, lon, alt_ft, gs_kt, hdg, vr_fpm, on_ground, ts) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (icao, callsign, lat, lon, alt, gs, hdg, vr, on_gnd, now),
+                    "INSERT INTO sightings (icao, callsign, lat, lon, alt_ft, gs_kt, hdg, vr_fpm, on_ground, ts, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (icao, callsign, lat, lon, alt, gs, hdg, vr, on_gnd, now, source),
                 )
 
         self.conn.commit()
@@ -264,6 +271,60 @@ class AdsbProcess:
             pass
 
 
+class RemoteAdsbSource:
+    """Accepts TCP connection from Pi streamer, provides frame reader interface."""
+
+    def __init__(self, listen_port: int, source_label: str):
+        self.listen_port = listen_port
+        self.source_label = source_label  # "1090" or "978"
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
+        self.connected = False
+        self._server = None
+
+    async def start(self):
+        """Start TCP server, wait for Pi to connect."""
+        self._server = await asyncio.start_server(
+            self._on_connect, '0.0.0.0', self.listen_port)
+        logger.info("Listening for %s stream on port %d",
+                     self.source_label, self.listen_port)
+
+    async def _on_connect(self, reader, writer):
+        """Called when Pi streamer connects."""
+        self.reader = reader
+        self.writer = writer
+        self.connected = True
+        peer = writer.get_extra_info('peername')
+        logger.info("Pi connected for %s from %s", self.source_label, peer)
+
+    async def stop(self):
+        if self._server:
+            self._server.close()
+        if self.writer:
+            self.writer.close()
+        self.connected = False
+
+
+class DualAdsbServer:
+    """Accepts streams from both 1090 and 978 MHz, merges into one WebSocket output."""
+
+    def __init__(self, port_1090: int = 9001, port_978: int = 9002):
+        self.source_1090 = RemoteAdsbSource(port_1090, "1090")
+        self.source_978 = RemoteAdsbSource(port_978, "978")
+        self.source_stats = {
+            "1090": {"connected": False, "msg_rate": 0, "aircraft_count": 0},
+            "978": {"connected": False, "msg_rate": 0, "aircraft_count": 0},
+        }
+
+    async def start(self):
+        await self.source_1090.start()
+        await self.source_978.start()
+
+    async def stop(self):
+        await self.source_1090.stop()
+        await self.source_978.stop()
+
+
 # Connected WebSocket clients
 clients: set = set()
 
@@ -372,6 +433,118 @@ async def frame_reader(adsb: AdsbProcess, ac_log: AircraftLog):
 
 
 SAMPLE_RATE = 2000000
+UAT_SAMPLE_RATE = 2083334
+
+
+async def remote_frame_reader(source: RemoteAdsbSource, ac_log: AircraftLog,
+                               dual_server: DualAdsbServer):
+    """Read binary frames from a remote TCP source (Pi streamer) and broadcast."""
+    source_label = source.source_label
+    bandwidth = SAMPLE_RATE if source_label == "1090" else UAT_SAMPLE_RATE
+    aircraft_count = 0
+    spectrum_count = 0
+    msg_count = 0
+
+    while True:
+        if not source.connected or source.reader is None:
+            await asyncio.sleep(0.5)
+            dual_server.source_stats[source_label]["connected"] = False
+            continue
+
+        dual_server.source_stats[source_label]["connected"] = True
+
+        try:
+            # Read frame header: type (1 byte) + length (4 bytes)
+            header = await source.reader.readexactly(5)
+            frame_type = header[0:1]
+            payload_len = struct.unpack('<I', header[1:5])[0]
+            payload = await source.reader.readexactly(payload_len)
+
+            if frame_type == b'D':
+                # Decoded aircraft JSON
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    aircraft_count += 1
+                    ac_count = data.get('aircraft_count', 0)
+                    msg_rate = data.get('msg_rate', 0)
+
+                    # Update source stats
+                    dual_server.source_stats[source_label]["msg_rate"] = msg_rate
+                    dual_server.source_stats[source_label]["aircraft_count"] = ac_count
+
+                    if aircraft_count <= 3 or aircraft_count % 30 == 0:
+                        logger.info("[%s] Aircraft report #%d: %d tracked, %.1f msg/s",
+                                    source_label, aircraft_count, ac_count, msg_rate)
+
+                    # Tag each aircraft with source frequency
+                    ac_list = data.get("aircraft", [])
+                    for ac in ac_list:
+                        ac["source"] = source_label
+
+                    # Log to database
+                    if ac_list:
+                        try:
+                            ac_log.log_aircraft(ac_list, source=source_label)
+                        except Exception as e:
+                            logger.warning("[%s] DB log error: %s", source_label, e)
+
+                    await broadcast(json.dumps({
+                        "type": "aircraft",
+                        "source": source_label,
+                        "sources": dual_server.source_stats,
+                        **data,
+                    }))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning("[%s] Bad JSON in D frame: %s", source_label, e)
+
+            elif frame_type == b'S':
+                # Spectrum frame: center_freq (4B) + float32[] bins
+                center_freq = struct.unpack('<I', payload[:4])[0]
+                spectrum_data = payload[4:]
+                n_bins = len(spectrum_data) // 4
+                bins = struct.unpack(f'<{n_bins}f', spectrum_data)
+
+                spectrum_count += 1
+                if spectrum_count <= 3:
+                    logger.info("[%s] Spectrum #%d: %d bins, range=[%.1f, %.1f] dBFS",
+                                source_label, spectrum_count, n_bins, min(bins), max(bins))
+
+                await broadcast(json.dumps({
+                    "type": "spectrum",
+                    "source": source_label,
+                    "psd_dbfs": list(bins),
+                    "center_freq_hz": center_freq,
+                    "bandwidth_hz": bandwidth,
+                }))
+
+            elif frame_type == b'M':
+                # Raw hex message
+                hex_str = payload.decode('ascii', errors='replace')
+                msg_count += 1
+                if msg_count <= 5 or msg_count % 100 == 0:
+                    logger.info("[%s] Raw msg #%d: %s", source_label, msg_count, hex_str)
+
+                await broadcast(json.dumps({
+                    "type": "raw_msg",
+                    "source": source_label,
+                    "hex": hex_str,
+                }))
+
+            else:
+                logger.warning("[%s] Unknown frame type: 0x%02x", source_label, frame_type[0])
+
+        except asyncio.IncompleteReadError:
+            logger.warning("[%s] TCP stream broken, waiting for reconnect...",
+                           source_label)
+            source.connected = False
+            source.reader = None
+            source.writer = None
+            dual_server.source_stats[source_label]["connected"] = False
+            await asyncio.sleep(1.0)
+
+        except Exception as e:
+            logger.warning("[%s] Frame reader error: %s", source_label, e)
+            await asyncio.sleep(0.5)
 
 
 async def ws_handler(websocket):
@@ -393,10 +566,58 @@ async def ws_handler(websocket):
 @click.option("--gain", default=496, help="RTL-SDR gain in tenths of dB")
 @click.option("--device", default=0, help="RTL-SDR device index")
 @click.option("--test", is_flag=True, help="Test mode (synthetic messages)")
-def main(port, gain, device, test):
+@click.option("--remote", is_flag=True, help="Accept TCP streams from Pi instead of local subprocess")
+@click.option("--listen-port-1090", default=9001, help="TCP port for 1090 stream (remote mode)")
+@click.option("--listen-port-978", default=9002, help="TCP port for 978 stream (remote mode)")
+def main(port, gain, device, test, remote, listen_port_1090, listen_port_978):
     """GROUNDLINK ADS-B — Live aircraft tracker (C backend)."""
     import websockets
 
+    if remote:
+        # Remote mode: accept TCP streams from Raspberry Pi
+        dual = DualAdsbServer(port_1090=listen_port_1090, port_978=listen_port_978)
+
+        async def serve():
+            logger.info("=" * 50)
+            logger.info("GROUNDLINK ADS-B Decoder (REMOTE / Dual-Freq)")
+            logger.info("Frequencies: 1090 MHz + 978 MHz (UAT)")
+            logger.info("TCP listen: 1090 on port %d, 978 on port %d",
+                        listen_port_1090, listen_port_978)
+            logger.info("WebSocket: ws://0.0.0.0:%d", port)
+            logger.info("=" * 50)
+
+            ac_log = AircraftLog()
+            await dual.start()
+
+            # Start frame readers for both sources and pruner in background
+            reader_1090 = asyncio.create_task(
+                remote_frame_reader(dual.source_1090, ac_log, dual))
+            reader_978 = asyncio.create_task(
+                remote_frame_reader(dual.source_978, ac_log, dual))
+            pruner_task = asyncio.create_task(pruner_loop(DB_PATH))
+
+            async with websockets.serve(ws_handler, "0.0.0.0", port):
+                try:
+                    await asyncio.Future()  # Run forever
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    reader_1090.cancel()
+                    reader_978.cancel()
+                    pruner_task.cancel()
+                    await dual.stop()
+                    stats = ac_log.stats()
+                    logger.info("Session stats: %d unique aircraft, %d sightings",
+                                stats["unique_aircraft"], stats["total_sightings"])
+                    ac_log.close()
+
+        try:
+            asyncio.run(serve())
+        except KeyboardInterrupt:
+            logger.info("ADS-B shutting down")
+        return
+
+    # Local mode: spawn C decoder subprocess
     # Verify the C executable exists
     if not os.path.isfile(ADSB_EXE):
         logger.error("C decoder not found: %s", ADSB_EXE)
