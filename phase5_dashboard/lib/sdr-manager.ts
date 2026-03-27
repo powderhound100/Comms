@@ -9,7 +9,7 @@
  * In Docker it's at host.docker.internal:8780.
  */
 
-export type SdrMode = 'radio' | 'scanner' | 'adsb'
+export type SdrMode = 'radio' | 'scanner' | 'adsb' | 'adsb_dual'
 
 export interface RadioConfig {
   port?: number

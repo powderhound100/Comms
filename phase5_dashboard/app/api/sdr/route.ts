@@ -9,7 +9,7 @@ import type { SdrMode, ModeConfig } from '@/lib/sdr-manager'
  * POST /api/sdr  → { action: "start", mode, config } | { action: "stop" }
  */
 
-const VALID_MODES: SdrMode[] = ['radio', 'scanner', 'adsb']
+const VALID_MODES: SdrMode[] = ['radio', 'scanner', 'adsb', 'adsb_dual']
 
 export async function GET() {
   return NextResponse.json(await sdrManager.status())

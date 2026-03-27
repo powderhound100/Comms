@@ -81,11 +81,17 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
 
       // Build aircraft icon (rotated triangle)
       const rotation = ac.heading_deg ?? 0
-      const altColor = ac.altitude_ft != null
+
+      // Source-based coloring: 1090=cyan, 978=orange, both=purple, fallback=altitude
+      const sourceColor = ac.source === '978' ? '#fb923c'    // orange-400
+        : ac.source === 'both' ? '#c084fc'                   // purple-400
+        : null                                                // use altitude color
+
+      const altColor = sourceColor ?? (ac.altitude_ft != null
         ? ac.altitude_ft > 30000 ? '#38bdf8' // sky-400 (high)
         : ac.altitude_ft > 15000 ? '#34d399' // emerald-400 (mid)
         : '#fbbf24' // amber-400 (low)
-        : '#9ca3af' // gray-400
+        : '#9ca3af') // gray-400
 
       const iconHtml = `
         <div style="transform: rotate(${rotation}deg); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
@@ -103,8 +109,11 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
       })
 
       // Tooltip content
+      const sourceTag = ac.source === '978' ? ' [UAT]'
+        : ac.source === 'both' ? ' [1090+UAT]'
+        : ''
       const tooltip = [
-        `<b>${ac.callsign || ac.icao_hex}</b>`,
+        `<b>${ac.callsign || ac.icao_hex}${sourceTag}</b>`,
         ac.altitude_ft != null ? `FL${Math.round(ac.altitude_ft / 100)}` : null,
         ac.ground_speed_kt != null ? `${ac.ground_speed_kt.toFixed(0)} kt` : null,
         ac.heading_deg != null ? `HDG ${ac.heading_deg.toFixed(0)}°` : null,
@@ -177,6 +186,12 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Below FL150
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" /> UAT
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" /> Both
           </span>
           <span>{aircraft.filter(a => a.latitude != null).length} aircraft</span>
         </div>
