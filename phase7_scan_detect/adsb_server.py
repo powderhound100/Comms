@@ -125,16 +125,22 @@ class AircraftLog:
                     (cs, now, max(0, msgs - row[1]), icao),
                 )
 
-            # Deduplicate sightings: skip if last sighting has same position
+            # Deduplicate sightings: skip if same position OR <10s since last
             if lat is not None and lon is not None:
                 last = self.conn.execute(
-                    "SELECT lat, lon, callsign FROM sightings "
+                    "SELECT lat, lon, callsign, ts FROM sightings "
                     "WHERE icao = ? ORDER BY id DESC LIMIT 1",
                     (icao,),
                 ).fetchone()
 
-                if last and last[0] == lat and last[1] == lon and last[2] == callsign:
-                    continue  # duplicate position, skip
+                if last:
+                    same_pos = (last[0] == lat and last[1] == lon and last[2] == callsign)
+                    try:
+                        elapsed = time.time() - time.mktime(time.strptime(last[3], "%Y-%m-%dT%H:%M:%SZ"))
+                    except (ValueError, TypeError):
+                        elapsed = 999
+                    if same_pos or elapsed < 10:
+                        continue  # dedup: same position OR too recent
 
                 self.conn.execute(
                     "INSERT INTO sightings (icao, callsign, lat, lon, alt_ft, gs_kt, hdg, vr_fpm, on_ground, ts) "
@@ -156,6 +162,36 @@ class AircraftLog:
 
     def close(self):
         self.conn.close()
+
+
+async def pruner_loop(db_path: Path, interval_s: int = 3600, max_age_days: int = 7):
+    """Background task: delete sightings older than max_age_days in batches."""
+    await asyncio.sleep(60)  # initial delay
+    while True:
+        try:
+            cutoff = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime(time.time() - max_age_days * 86400),
+            )
+            conn = sqlite3.connect(str(db_path))
+            total_deleted = 0
+            while True:
+                deleted = conn.execute(
+                    "DELETE FROM sightings WHERE id IN ("
+                    "  SELECT id FROM sightings WHERE ts < ? LIMIT 5000"
+                    ")",
+                    (cutoff,),
+                ).rowcount
+                conn.commit()
+                total_deleted += deleted
+                if deleted < 5000:
+                    break
+            conn.close()
+            if total_deleted > 0:
+                logger.info("Pruner: deleted %d sightings older than %s", total_deleted, cutoff)
+        except Exception as e:
+            logger.warning("Pruner error: %s", e)
+        await asyncio.sleep(interval_s)
 
 
 class AdsbProcess:
@@ -382,8 +418,9 @@ def main(port, gain, device, test):
         ac_log = AircraftLog()
         await adsb.start()
 
-        # Start frame reader in background
+        # Start frame reader and pruner in background
         reader_task = asyncio.create_task(frame_reader(adsb, ac_log))
+        pruner_task = asyncio.create_task(pruner_loop(DB_PATH))
 
         async with websockets.serve(ws_handler, "0.0.0.0", port):
             try:
@@ -392,6 +429,7 @@ def main(port, gain, device, test):
                 pass
             finally:
                 reader_task.cancel()
+                pruner_task.cancel()
                 await adsb.stop()
                 stats = ac_log.stats()
                 logger.info("Session stats: %d unique aircraft, %d sightings",

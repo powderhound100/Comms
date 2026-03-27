@@ -31,6 +31,29 @@ export interface TrackedAircraft {
   on_ground: boolean
 }
 
+export interface FlightSighting {
+  lat: number
+  lon: number
+  alt_ft: number | null
+  gs_kt: number | null
+  hdg: number | null
+  ts: string
+}
+
+export interface FlightTrack {
+  icao: string
+  aircraft: {
+    icao: string
+    callsign: string | null
+    first_seen: string
+    last_seen: string
+    total_msgs: number
+    sessions: number
+  } | null
+  sightings: FlightSighting[]
+  total_points: number
+}
+
 export interface SatelliteJob {
   satellite: string
   pipeline: string

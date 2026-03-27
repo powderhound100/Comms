@@ -323,6 +323,71 @@ async def handle_aircraft_log(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e), "aircraft": []}, status=200)
 
 
+async def handle_aircraft_track(request: web.Request) -> web.Response:
+    """Return flight path sightings for a single aircraft (downsampled to 500 max)."""
+    icao = request.match_info["icao"].upper()
+    try:
+        conn = _get_db()
+        conn.row_factory = sqlite3.Row
+
+        # Fetch all sightings with position, ordered by time
+        rows = conn.execute(
+            "SELECT lat, lon, alt_ft, gs_kt, hdg, ts FROM sightings "
+            "WHERE icao = ? AND lat IS NOT NULL AND lon IS NOT NULL ORDER BY ts ASC",
+            (icao,),
+        ).fetchall()
+
+        total_points = len(rows)
+
+        # Downsample to 500 max: keep first, last, and every Nth
+        if total_points > 500:
+            step = total_points / 500
+            indices = {0, total_points - 1}
+            i = 0.0
+            while i < total_points:
+                indices.add(int(i))
+                i += step
+            indices = sorted(indices)
+            rows = [rows[i] for i in indices]
+
+        sightings = [
+            {
+                "lat": r["lat"], "lon": r["lon"], "alt_ft": r["alt_ft"],
+                "gs_kt": r["gs_kt"], "hdg": r["hdg"], "ts": r["ts"],
+            }
+            for r in rows
+        ]
+
+        # Fetch aircraft master record
+        ac_row = conn.execute(
+            "SELECT icao, callsign, first_seen, last_seen, total_msgs, sessions "
+            "FROM aircraft WHERE icao = ?",
+            (icao,),
+        ).fetchone()
+
+        aircraft = None
+        if ac_row:
+            aircraft = {
+                "icao": ac_row["icao"], "callsign": ac_row["callsign"],
+                "first_seen": ac_row["first_seen"], "last_seen": ac_row["last_seen"],
+                "total_msgs": ac_row["total_msgs"], "sessions": ac_row["sessions"],
+            }
+
+        conn.close()
+
+        return web.json_response({
+            "icao": icao,
+            "aircraft": aircraft,
+            "sightings": sightings,
+            "total_points": total_points,
+        })
+    except Exception as e:
+        return web.json_response(
+            {"icao": icao, "aircraft": None, "sightings": [], "total_points": 0, "error": str(e)},
+            status=200,
+        )
+
+
 def build_app() -> web.Application:
     app = web.Application()
     # CORS middleware for Docker → host requests
@@ -342,6 +407,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/sdr/start", handle_start)
     app.router.add_post("/api/sdr/stop", handle_stop)
     app.router.add_get("/api/adsb/log", handle_aircraft_log)
+    app.router.add_get("/api/adsb/track/{icao}", handle_aircraft_track)
     return app
 
 

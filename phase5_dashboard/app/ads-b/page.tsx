@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import AircraftMap from '@/components/AircraftMap'
 import type { TrackedAircraft } from '@/data/scan-detect'
+
+const FlightPathModal = dynamic(() => import('@/components/FlightPathModal'), { ssr: false })
 import {
   rfParameters,
   messageTypes,
@@ -147,6 +150,7 @@ export default function ADSBPage() {
   }
   const [logData, setLogData] = useState<{ unique_aircraft: number; today: number; total_sightings: number; aircraft: LoggedAircraft[] }>({ unique_aircraft: 0, today: 0, total_sightings: 0, aircraft: [] })
   const [showLog, setShowLog] = useState(false)
+  const [selectedTrackIcao, setSelectedTrackIcao] = useState<string | null>(null)
 
   // SDR mode control
   const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('adsb')
@@ -665,7 +669,7 @@ export default function ADSBPage() {
                   </tr>
                 ) : (
                   logData.aircraft.map(ac => (
-                    <tr key={ac.icao} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                    <tr key={ac.icao} className="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer" onClick={() => setSelectedTrackIcao(ac.icao)}>
                       <td className="px-3 py-1.5 font-mono text-amber-400">{ac.icao}</td>
                       <td className="px-3 py-1.5 font-medium">
                         {ac.callsign || <span className="text-gray-600">---</span>}
@@ -697,6 +701,11 @@ export default function ADSBPage() {
           </div>
         )}
       </div>
+
+      {/* Flight Path Modal */}
+      {selectedTrackIcao && (
+        <FlightPathModal icao={selectedTrackIcao} onClose={() => setSelectedTrackIcao(null)} />
+      )}
     </div>
   )
 }
