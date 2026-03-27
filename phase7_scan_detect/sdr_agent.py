@@ -323,6 +323,56 @@ async def handle_aircraft_log(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e), "aircraft": []}, status=200)
 
 
+def _rdp_indices(points: list, epsilon: float) -> list:
+    """Ramer-Douglas-Peucker simplification returning indices to keep.
+
+    Uses an iterative stack to avoid Python recursion limits on long tracks.
+    *points* is a list of (lat, lon) tuples; *epsilon* is the tolerance in
+    degrees (~0.0001° ≈ 11 m).
+    """
+    n = len(points)
+    if n <= 2:
+        return list(range(n))
+
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+
+    while stack:
+        start, end = stack.pop()
+        if end - start < 2:
+            continue
+
+        # Line from points[start] to points[end]
+        sx, sy = points[start]
+        ex, ey = points[end]
+        dx, dy = ex - sx, ey - sy
+        line_len_sq = dx * dx + dy * dy
+
+        max_dist = 0.0
+        max_idx = start
+        for i in range(start + 1, end):
+            px, py = points[i]
+            if line_len_sq == 0:
+                d = (px - sx) ** 2 + (py - sy) ** 2
+            else:
+                t = ((px - sx) * dx + (py - sy) * dy) / line_len_sq
+                t = max(0.0, min(1.0, t))
+                proj_x = sx + t * dx
+                proj_y = sy + t * dy
+                d = (px - proj_x) ** 2 + (py - proj_y) ** 2
+            if d > max_dist:
+                max_dist = d
+                max_idx = i
+
+        if max_dist > epsilon * epsilon:  # compare squared to avoid sqrt
+            keep[max_idx] = True
+            stack.append((start, max_idx))
+            stack.append((max_idx, end))
+
+    return [i for i, k in enumerate(keep) if k]
+
+
 async def handle_aircraft_track(request: web.Request) -> web.Response:
     """Return flight path sightings for a single aircraft (downsampled to 500 max)."""
     icao = request.match_info["icao"].upper()
@@ -339,15 +389,14 @@ async def handle_aircraft_track(request: web.Request) -> web.Response:
 
         total_points = len(rows)
 
-        # Downsample to 500 max: keep first, last, and every Nth
+        # Downsample to 500 max using RDP shape-preserving simplification
         if total_points > 500:
-            step = total_points / 500
-            indices = {0, total_points - 1}
-            i = 0.0
-            while i < total_points:
-                indices.add(int(i))
-                i += step
-            indices = sorted(indices)
+            points = [(r["lat"], r["lon"]) for r in rows]
+            epsilon = 0.0001  # ~11 m
+            indices = _rdp_indices(points, epsilon)
+            while len(indices) > 500:
+                epsilon *= 2
+                indices = _rdp_indices(points, epsilon)
             rows = [rows[i] for i in indices]
 
         sightings = [
