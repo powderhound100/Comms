@@ -25,7 +25,8 @@ import sys
 import time
 from pathlib import Path
 
-from aiohttp import web
+import aiohttp as aiohttp_client  # for proxying to Pi
+from aiohttp import web, ClientSession
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +38,29 @@ logger = logging.getLogger("sdr-agent")
 SCRIPT_DIR = Path(__file__).parent.resolve()
 RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
 MAX_LOG_LINES = 80
+
+# Pi configuration
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
+
+CONFIG_PATH = SCRIPT_DIR / "groundlink.toml"
+
+def load_pi_config() -> dict:
+    """Load Pi connection settings from groundlink.toml."""
+    if tomllib and CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "rb") as f:
+            return tomllib.load(f)
+    return {"pi": {"host": "192.168.1.50", "agent_port": 8781},
+            "bridges": {"adsb_1090_port": 9001, "adsb_978_port": 9002, "ws_port": 8771}}
+
+PI_CONFIG = load_pi_config()
+PI_HOST = PI_CONFIG.get("pi", {}).get("host", "192.168.1.50")
+PI_PORT = PI_CONFIG.get("pi", {}).get("agent_port", 8781)
 
 
 class SdrProcessManager:
@@ -192,6 +216,17 @@ class SdrProcessManager:
             if config.get("test"):
                 cmd.append("--test")
             return cmd
+        elif mode == "adsb_dual":
+            bridges = PI_CONFIG.get("bridges", {})
+            cmd = [
+                sys.executable,
+                str(SCRIPT_DIR / "adsb_server.py"),
+                "--remote",
+                "--listen-port-1090", str(config.get("port_1090", bridges.get("adsb_1090_port", 9001))),
+                "--listen-port-978", str(config.get("port_978", bridges.get("adsb_978_port", 9002))),
+                "--port", str(config.get("port", bridges.get("ws_port", 8771))),
+            ]
+            return cmd
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
@@ -234,9 +269,9 @@ async def handle_start(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
 
     mode = body.get("mode")
-    if mode not in ("radio", "scanner", "adsb"):
+    if mode not in ("radio", "scanner", "adsb", "adsb_dual"):
         return web.json_response(
-            {"ok": False, "error": f"Invalid mode: {mode}. Use: radio, scanner, adsb"},
+            {"ok": False, "error": f"Invalid mode: {mode}. Use: radio, scanner, adsb, adsb_dual"},
             status=400,
         )
 
@@ -437,6 +472,72 @@ async def handle_aircraft_track(request: web.Request) -> web.Response:
         )
 
 
+# ── Pi proxy endpoints ──
+
+async def handle_pi_status(request: web.Request) -> web.Response:
+    """GET /api/pi/status → forward to Pi agent."""
+    try:
+        async with ClientSession() as session:
+            async with session.get(
+                f"http://{PI_HOST}:{PI_PORT}/api/pi/status",
+                timeout=aiohttp_client.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json()
+                return web.json_response(data)
+    except Exception as e:
+        return web.json_response({"error": str(e), "pi_reachable": False}, status=502)
+
+
+async def handle_pi_health(request: web.Request) -> web.Response:
+    """GET /api/pi/health → forward to Pi agent."""
+    try:
+        async with ClientSession() as session:
+            async with session.get(
+                f"http://{PI_HOST}:{PI_PORT}/api/pi/health",
+                timeout=aiohttp_client.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json()
+                return web.json_response(data)
+    except Exception as e:
+        return web.json_response({"error": str(e), "ok": False}, status=502)
+
+
+async def handle_pi_sdr_action(request: web.Request) -> web.Response:
+    """POST /api/pi/sdr/{slot}/{action} → forward to Pi agent."""
+    slot = request.match_info['slot']
+    action = request.match_info['action']
+    try:
+        body = await request.json() if request.content_length else {}
+    except Exception:
+        body = {}
+    try:
+        async with ClientSession() as session:
+            async with session.post(
+                f"http://{PI_HOST}:{PI_PORT}/api/pi/sdr/{slot}/{action}",
+                json=body,
+                timeout=aiohttp_client.ClientTimeout(total=10),
+            ) as resp:
+                data = await resp.json()
+                return web.json_response(data)
+    except Exception as e:
+        return web.json_response({"error": str(e), "ok": False}, status=502)
+
+
+async def handle_pi_sdr_log(request: web.Request) -> web.Response:
+    """GET /api/pi/sdr/{slot}/log → forward to Pi agent."""
+    slot = request.match_info['slot']
+    try:
+        async with ClientSession() as session:
+            async with session.get(
+                f"http://{PI_HOST}:{PI_PORT}/api/pi/sdr/{slot}/log",
+                timeout=aiohttp_client.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json()
+                return web.json_response(data)
+    except Exception as e:
+        return web.json_response({"error": str(e), "log": []}, status=502)
+
+
 def build_app() -> web.Application:
     app = web.Application()
     # CORS middleware for Docker → host requests
@@ -457,6 +558,11 @@ def build_app() -> web.Application:
     app.router.add_post("/api/sdr/stop", handle_stop)
     app.router.add_get("/api/adsb/log", handle_aircraft_log)
     app.router.add_get("/api/adsb/track/{icao}", handle_aircraft_track)
+    # Pi proxy routes
+    app.router.add_get("/api/pi/status", handle_pi_status)
+    app.router.add_get("/api/pi/health", handle_pi_health)
+    app.router.add_post("/api/pi/sdr/{slot}/{action}", handle_pi_sdr_action)
+    app.router.add_get("/api/pi/sdr/{slot}/log", handle_pi_sdr_log)
     return app
 
 

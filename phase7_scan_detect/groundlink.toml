@@ -1,0 +1,23 @@
+[pi]
+host = "192.168.1.50"           # Pi IP address (or "groundlink-pi.local")
+agent_port = 8781               # Pi agent HTTP port
+health_poll_interval = 10       # Seconds between health checks
+
+[bridges]
+adsb_1090_port = 9001           # Local TCP port for 1090 stream
+adsb_978_port = 9002            # Local TCP port for 978 stream
+ws_port = 8771                  # Merged ADS-B WebSocket port
+
+[pi.sdr.0]
+serial = "GROUNDLINK_1090"
+mode = "adsb_1090"
+gain = 496
+
+[pi.sdr.1]
+serial = "GROUNDLINK_978"
+mode = "adsb_978"
+gain = 496
+
+[pi.sdr.2]
+serial = "GROUNDLINK_RADIO"
+# Mode set dynamically via dashboard
