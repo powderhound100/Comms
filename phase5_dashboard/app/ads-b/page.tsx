@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import AircraftMap from '@/components/AircraftMap'
-import type { TrackedAircraft } from '@/data/scan-detect'
+import type { TrackedAircraft, AdsbSources, PiHealth, PiSlot } from '@/data/scan-detect'
 
 const FlightPathModal = dynamic(() => import('@/components/FlightPathModal'), { ssr: false })
 import {
@@ -157,11 +157,21 @@ export default function ADSBPage() {
   const [testMode, setTestMode] = useState(false)
   const [gain, setGain] = useState(496)
 
+  // Dual-frequency state
+  const [psdData978, setPsdData978] = useState<number[] | null>(null)
+  const [source1090, setSource1090] = useState<AdsbSources['1090'] | null>(null)
+  const [source978, setSource978] = useState<AdsbSources['978'] | null>(null)
+
+  // Pi health state
+  const [piHealth, setPiHealth] = useState<PiHealth | null>(null)
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvas978Ref = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const trailsRef = useRef<Record<string, [number, number][]>>({})
 
   useSpectrumCanvas(canvasRef, psdData, 1090e6, 2e6)
+  useSpectrumCanvas(canvas978Ref, psdData978, 978e6, 2.083e6)
 
   // Poll aircraft log
   useEffect(() => {
@@ -173,6 +183,22 @@ export default function ADSBPage() {
     }
     fetchLog()
     const timer = setInterval(fetchLog, 10000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Poll Pi health
+  useEffect(() => {
+    async function fetchPiHealth() {
+      try {
+        const res = await fetch('/api/pi/health')
+        if (res.ok) {
+          const data = await res.json()
+          if (!data.error) setPiHealth(data)
+        }
+      } catch { /* offline */ }
+    }
+    fetchPiHealth()
+    const timer = setInterval(fetchPiHealth, 5000)
     return () => clearInterval(timer)
   }, [])
 
@@ -245,12 +271,19 @@ export default function ADSBPage() {
               vertical_rate_fpm: a.vr_fpm ?? null,
               squawk: null,
               on_ground: a.on_ground ?? false,
+              source: a.source ?? '1090',
             }))
 
             setAircraft(acList)
             setTotalMsgs(data.total_msgs ?? 0)
             setMsgRate(data.msg_rate ?? 0)
             setAircraftCount(data.aircraft_count ?? 0)
+
+            // Parse dual-source metadata
+            if (data.sources) {
+              setSource1090(data.sources['1090'] || null)
+              setSource978(data.sources['978'] || null)
+            }
 
             // Update trails
             const newTrails = { ...trailsRef.current }
@@ -274,7 +307,11 @@ export default function ADSBPage() {
             setTrails({ ...newTrails })
 
           } else if (data.type === 'spectrum') {
-            setPsdData(data.psd_dbfs)
+            if (data.center_freq_hz === 978000000) {
+              setPsdData978(data.psd_dbfs)
+            } else {
+              setPsdData(data.psd_dbfs)
+            }
           }
         } catch { /* skip malformed */ }
       }
@@ -322,7 +359,7 @@ export default function ADSBPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-1">ADS-B Aircraft Tracker</h1>
         <p className="text-gray-400 text-sm">
-          Live Mode S Extended Squitter decoding at 1090 MHz — C backend with RTL-SDR
+          Dual-frequency ADS-B tracking — 1090 MHz + 978 MHz UAT via Pi SDR node
         </p>
       </div>
 
@@ -365,7 +402,7 @@ export default function ADSBPage() {
       </SdrModeBar>
 
       {/* Status + Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Status</div>
           <div className="flex items-center gap-2 mt-1">
@@ -376,8 +413,24 @@ export default function ADSBPage() {
           </div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-          <div className="text-[10px] text-gray-500 uppercase tracking-wider">Frequency</div>
-          <div className="text-lg font-bold text-cyan-400 mt-1">1090 MHz</div>
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider">1090 MHz</div>
+          <div className="flex items-center gap-2 mt-1">
+            <div className={`w-2 h-2 rounded-full ${source1090?.connected ? 'bg-cyan-400' : 'bg-gray-600'}`} />
+            <span className="text-sm font-bold text-cyan-400">
+              {source1090?.aircraft_count ?? aircraftCount}
+            </span>
+            <span className="text-xs text-gray-500">{(source1090?.msg_rate ?? msgRate).toFixed(0)}/s</span>
+          </div>
+        </div>
+        <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider">978 MHz</div>
+          <div className="flex items-center gap-2 mt-1">
+            <div className={`w-2 h-2 rounded-full ${source978?.connected ? 'bg-orange-400' : 'bg-gray-600'}`} />
+            <span className="text-sm font-bold text-orange-400">
+              {source978?.aircraft_count ?? 0}
+            </span>
+            <span className="text-xs text-gray-500">{(source978?.msg_rate ?? 0).toFixed(0)}/s</span>
+          </div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Aircraft</div>
@@ -426,6 +479,30 @@ export default function ADSBPage() {
         </div>
       </div>
 
+      {/* 978 MHz Spectrum */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
+        <div className="px-4 py-2 border-b border-gray-800">
+          <span className="text-sm font-medium text-orange-300">978 MHz UAT Spectrum</span>
+          <span className="text-xs text-gray-500 ml-3 font-mono">2.08 MHz bandwidth</span>
+        </div>
+        <div className="relative">
+          <canvas
+            ref={canvas978Ref}
+            width={1024}
+            height={140}
+            className="w-full block"
+            style={{ imageRendering: 'pixelated' }}
+          />
+          {!psdData978 && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xs text-gray-600 font-mono">
+                {connected ? 'Waiting for 978 MHz data...' : 'Connect to see UAT spectrum'}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Aircraft Table */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-800">
@@ -438,6 +515,7 @@ export default function ADSBPage() {
                 <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleSort('icao')}>
                   ICAO{sortIcon('icao')}
                 </th>
+                <th className="px-3 py-2">Source</th>
                 <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleSort('callsign')}>
                   Callsign{sortIcon('callsign')}
                 </th>
@@ -459,7 +537,7 @@ export default function ADSBPage() {
             <tbody>
               {sortedAircraft.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-gray-600">
+                  <td colSpan={8} className="px-3 py-8 text-center text-gray-600">
                     {connected ? 'Waiting for aircraft...' : 'Not connected — start adsb_server.py'}
                   </td>
                 </tr>
@@ -467,6 +545,15 @@ export default function ADSBPage() {
                 sortedAircraft.map(ac => (
                   <tr key={ac.icao_hex} className="border-b border-gray-800/50 hover:bg-gray-800/30">
                     <td className="px-3 py-1.5 font-mono text-amber-400">{ac.icao_hex}</td>
+                    <td className="px-3 py-1.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        ac.source === '978' ? 'bg-orange-900/50 text-orange-300 border border-orange-700' :
+                        ac.source === 'both' ? 'bg-purple-900/50 text-purple-300 border border-purple-700' :
+                        'bg-cyan-900/50 text-cyan-300 border border-cyan-700'
+                      }`}>
+                        {ac.source ?? '1090'}
+                      </span>
+                    </td>
                     <td className="px-3 py-1.5 font-medium">
                       {ac.callsign || <span className="text-gray-600">---</span>}
                     </td>
@@ -509,6 +596,48 @@ export default function ADSBPage() {
           </table>
         </div>
       </div>
+
+      {/* Pi Status */}
+      {piHealth && (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
+          <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-300">Pi SDR Node</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono text-gray-400">{piHealth.hostname}</span>
+              <span className="text-xs font-mono text-gray-500">{piHealth.ip}</span>
+              <span className={`text-xs font-mono ${
+                piHealth.cpu_temp_c >= 75 ? 'text-red-400' :
+                piHealth.cpu_temp_c >= 60 ? 'text-amber-400' :
+                'text-emerald-400'
+              }`}>
+                {piHealth.cpu_temp_c.toFixed(1)}°C
+              </span>
+            </div>
+          </div>
+          <div className="p-4 space-y-2">
+            {piHealth.slots.map(slot => (
+              <div key={slot.id} className="flex items-center gap-3 text-sm">
+                <span className="text-gray-500 w-14">Slot {slot.id}</span>
+                <span className="font-mono text-gray-300 w-28">{slot.mode ?? 'idle'}</span>
+                <div className={`w-2 h-2 rounded-full ${
+                  slot.status === 'running' ? 'bg-emerald-400' :
+                  slot.status === 'error' ? 'bg-red-400' :
+                  'bg-gray-600'
+                }`} />
+                <span className="text-xs text-gray-400">{slot.status}</span>
+                {slot.uptime_s > 0 && (
+                  <span className="text-xs text-gray-500 font-mono">
+                    {Math.floor(slot.uptime_s / 3600)}h {Math.floor((slot.uptime_s % 3600) / 60)}m
+                  </span>
+                )}
+              </div>
+            ))}
+            {piHealth.throttled && (
+              <div className="text-xs text-red-400 mt-2">Thermal throttling active</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Decode Pipeline */}
       <h2 className="text-lg font-semibold mb-3">Decode Pipeline</h2>

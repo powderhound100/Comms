@@ -29,6 +29,33 @@ export interface TrackedAircraft {
   vertical_rate_fpm: number | null
   squawk: string | null
   on_ground: boolean
+  source?: '1090' | '978' | 'both'
+}
+
+export interface AdsbSources {
+  '1090': { connected: boolean; msg_rate: number; aircraft_count: number }
+  '978':  { connected: boolean; msg_rate: number; aircraft_count: number }
+}
+
+export interface PiHealth {
+  hostname: string
+  ip: string
+  uptime_s: number
+  cpu_temp_c: number
+  cpu_pct: number
+  mem_pct: number
+  throttled: boolean
+  slots: PiSlot[]
+}
+
+export interface PiSlot {
+  id: number
+  mode: string | null
+  serial: string
+  pid: number | null
+  uptime_s: number
+  status: 'running' | 'stopped' | 'error'
+  config?: Record<string, unknown>
 }
 
 export interface FlightSighting {
