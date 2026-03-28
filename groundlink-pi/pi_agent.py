@@ -282,21 +282,23 @@ class SlotManager:
 # CORS Middleware
 # ---------------------------------------------------------------------------
 
-async def cors_middleware(request: web.Request, handler):
+def cors_middleware(app, handler):
     """Add CORS headers to all responses, handle preflight OPTIONS."""
-    if request.method == "OPTIONS":
-        resp = web.Response(status=204)
-    else:
-        try:
-            resp = await handler(request)
-        except web.HTTPException as e:
-            resp = e
+    async def middleware(request):
+        if request.method == "OPTIONS":
+            resp = web.Response(status=204)
+        else:
+            try:
+                resp = await handler(request)
+            except web.HTTPException as e:
+                resp = e
 
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Max-Age"] = "3600"
-    return resp
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        resp.headers["Access-Control-Max-Age"] = "3600"
+        return resp
+    return middleware
 
 
 # ---------------------------------------------------------------------------
