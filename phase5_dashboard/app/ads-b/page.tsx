@@ -260,6 +260,7 @@ export default function ADSBPage() {
               hdg: number | null
               vr_fpm: number | null
               on_ground: boolean
+              source?: '1090' | '978' | 'both'
             }) => ({
               icao_hex: a.icao,
               callsign: a.callsign || null,
