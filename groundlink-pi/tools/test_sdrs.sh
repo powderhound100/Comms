@@ -15,7 +15,7 @@ done
 
 echo ""
 echo "Quick read test (2 seconds each)..."
-for SERIAL in GL_1090 GL_978 GL_RADIO; do
+for SERIAL in GROUNDLINK_1090 GROUNDLINK_978 GL_RADIO; do
     echo -n "  $SERIAL: "
     if timeout 2 rtl_test -d "$SERIAL" 2>&1 | grep -q "Sampling"; then
         echo "OK"
