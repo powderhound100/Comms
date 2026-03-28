@@ -8,6 +8,7 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/groundlink
+ExecStartPre=/bin/sleep 10
 ExecStart=/opt/groundlink/venv/bin/python pi_agent.py
 Restart=always
 RestartSec=5
