@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-export type SdrMode = 'radio' | 'scanner' | 'adsb'
+export type SdrMode = 'radio' | 'scanner' | 'adsb' | 'adsb_dual'
 
 export interface SdrStatus {
   active_mode: SdrMode | null

@@ -217,9 +217,10 @@ export default function ADSBPage() {
     setAircraftCount(0)
   }, [sdrStop])
 
-  // WebSocket connection — only when ADS-B mode is active
+  // WebSocket connection — when adsb or adsb_dual mode is active
+  const isAdsbActive = isMyMode || sdrStatus.active_mode === 'adsb_dual'
   useEffect(() => {
-    if (!isMyMode) {
+    if (!isAdsbActive) {
       setConnected(false)
       return
     }
@@ -325,7 +326,7 @@ export default function ADSBPage() {
       if (ws) ws.close()
       wsRef.current = null
     }
-  }, [isMyMode])
+  }, [isAdsbActive])
 
   // Sort aircraft for table
   const sortedAircraft = [...aircraft].sort((a, b) => {

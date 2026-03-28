@@ -6,12 +6,14 @@ const MODE_LABELS: Record<SdrMode, string> = {
   radio: 'Radio Receiver',
   scanner: 'Broadband Scanner',
   adsb: 'ADS-B Decoder',
+  adsb_dual: 'ADS-B Dual (Pi)',
 }
 
 const MODE_PAGES: Record<SdrMode, string> = {
   radio: '/radio',
   scanner: '/scan-detect',
   adsb: '/ads-b',
+  adsb_dual: '/ads-b',
 }
 
 interface SdrModeBarProps {
