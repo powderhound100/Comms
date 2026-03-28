@@ -282,7 +282,7 @@ class SlotManager:
 # CORS Middleware
 # ---------------------------------------------------------------------------
 
-def cors_middleware(app, handler):
+async def cors_middleware(app, handler):
     """Add CORS headers to all responses, handle preflight OPTIONS."""
     async def middleware(request):
         if request.method == "OPTIONS":
