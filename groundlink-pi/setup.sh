@@ -29,7 +29,9 @@ apt-get install -y \
     avahi-daemon \
     avahi-utils \
     libitpp-dev \
-    libsndfile1-dev
+    libsndfile1-dev \
+    libncurses-dev \
+    libpulse-dev
 
 # ── Step 2: Install Directory ─────────────────────
 echo ""
@@ -64,14 +66,34 @@ echo "[5/8] Compiling C decoders for ARM..."
 cd "$INSTALL_DIR/c_decoders"
 sudo -u "$PI_USER" bash build.sh
 
-# ── Step 6: Build DSD-FME (P25 decoder) ──────────
+# ── Step 6a: Build libmbe (required by DSD-FME) ──
 echo ""
-echo "[6/8] Building DSD-FME for P25 support..."
-if ! command -v dsd-fme &>/dev/null; then
+echo "[6/8] Building libmbe + DSD-FME for P25 support..."
+if ! ldconfig -p | grep -q libmbe; then
+    echo "  Building libmbe (AMBE/IMBE codec)..."
     cd /tmp
+    rm -rf mbelib
+    wget -q https://github.com/lwvmobile/mbelib/archive/refs/heads/ambe_tones.tar.gz
+    tar xzf ambe_tones.tar.gz
+    cd mbelib-ambe_tones
+    mkdir -p build && cd build
+    cmake ..
+    make -j"$(nproc)"
+    make install
+    ldconfig
+    echo "  -> libmbe installed"
+else
+    echo "  -> libmbe already installed"
+fi
+
+# ── Step 6b: Build DSD-FME (P25 decoder) ─────────
+if ! command -v dsd-fme &>/dev/null; then
+    echo "  Building DSD-FME..."
+    cd /tmp
+    rm -rf dsd-fme
     git clone https://github.com/lwvmobile/dsd-fme.git
     cd dsd-fme
-    mkdir build && cd build
+    mkdir -p build && cd build
     cmake ..
     make -j"$(nproc)"
     make install
