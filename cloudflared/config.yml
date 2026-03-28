@@ -9,7 +9,7 @@ ingress:
   - hostname: scanner-api.powderhound420.com
     service: http://host.docker.internal:8766
   - hostname: radio.powderhound420.com
-    service: http://192.168.1.50:8770
+    service: http://10.0.0.245:8770
   - hostname: adsb.powderhound420.com
     service: http://host.docker.internal:8771
   - service: http_status:404

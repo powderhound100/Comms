@@ -10,9 +10,9 @@ services:
     environment:
       - SCANNER_API_URL=http://host.docker.internal:8766
       - SCANNER_WS_URL=ws://host.docker.internal:8765
-      - RADIO_WS_URL=ws://192.168.1.50:8770
+      - RADIO_WS_URL=ws://10.0.0.245:8770
       - SDR_AGENT_URL=http://host.docker.internal:8780
-      - PI_AGENT_URL=http://192.168.1.50:8781
+      - PI_AGENT_URL=http://10.0.0.245:8781
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
