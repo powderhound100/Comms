@@ -9,15 +9,15 @@ adsb_978_port = 9002            # Local TCP port for 978 stream
 ws_port = 8771                  # Merged ADS-B WebSocket port
 
 [pi.sdr.0]
-serial = "GROUNDLINK_1090"
+serial = "GL_1090"
 mode = "adsb_1090"
 gain = 496
 
 [pi.sdr.1]
-serial = "GROUNDLINK_978"
+serial = "GL_978"
 mode = "adsb_978"
 gain = 496
 
 [pi.sdr.2]
-serial = "GROUNDLINK_RADIO"
+serial = "GL_RADIO"
 # Mode set dynamically via dashboard

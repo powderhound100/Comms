@@ -11,9 +11,9 @@ echo ""
 read -p "Which dongle? [1090/978/radio]: " DONGLE
 
 case $DONGLE in
-    1090)  SERIAL="GROUNDLINK_1090" ;;
-    978)   SERIAL="GROUNDLINK_978"  ;;
-    radio) SERIAL="GROUNDLINK_RADIO" ;;
+    1090)  SERIAL="GL_1090" ;;
+    978)   SERIAL="GL_978"  ;;
+    radio) SERIAL="GL_RADIO" ;;
     *)     echo "Unknown dongle type: $DONGLE"; exit 1 ;;
 esac
 

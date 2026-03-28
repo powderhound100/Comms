@@ -9,21 +9,21 @@ adsb_978_port = 9002          # TCP bridge port for 978 MHz
 
 [sdr.0]
 label = "ADS-B 1090"
-serial = "GROUNDLINK_1090"    # Programmed via rtl_eeprom
+serial = "GL_1090"    # Programmed via rtl_eeprom
 default_mode = "adsb_1090"
 auto_start = true             # Start on pi_agent boot
 gain = 496                    # Gain in tenths of dB
 
 [sdr.1]
 label = "ADS-B 978"
-serial = "GROUNDLINK_978"
+serial = "GL_978"
 default_mode = "adsb_978"
 auto_start = true
 gain = 496
 
 [sdr.2]
 label = "Radio/Scanner"
-serial = "GROUNDLINK_RADIO"
+serial = "GL_RADIO"
 default_mode = "radio"        # Start in radio mode
 auto_start = false            # Wait for dashboard command
 default_freq = 154.8          # Default frequency MHz
