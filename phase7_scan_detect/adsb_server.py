@@ -317,6 +317,8 @@ class DualAdsbServer:
         }
         # Merged aircraft table: ICAO -> aircraft dict (with source tag)
         self.merged_aircraft: dict[str, dict] = {}
+        # Per-source total message counters (accumulated, not replaced)
+        self.total_msgs: dict[str, int] = {"1090": 0, "978": 0}
 
     async def start(self):
         await self.source_1090.start()
@@ -512,12 +514,17 @@ async def remote_frame_reader(source: RemoteAdsbSource, ac_log: AircraftLog,
                     total_rate = sum(
                         s.get("msg_rate", 0) for s in dual_server.source_stats.values()
                     )
+                    # Track total msgs per source (don't let 978's 0 overwrite 1090's count)
+                    source_total = data.get("total_msgs", 0)
+                    if source_total > 0:
+                        dual_server.total_msgs[source_label] = source_total
+                    combined_total = sum(dual_server.total_msgs.values())
                     await broadcast(json.dumps({
                         "type": "aircraft",
                         "sources": dual_server.source_stats,
                         "aircraft_count": len(merged_list),
                         "msg_rate": total_rate,
-                        "total_msgs": data.get("total_msgs", 0),
+                        "total_msgs": combined_total,
                         "aircraft": merged_list,
                     }))
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
