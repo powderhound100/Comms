@@ -749,26 +749,32 @@ static void build_test_msg(uint8_t *msg, uint32_t icao, int tc,
 
 /* ── Parse command line ──────────────────────────────────────── */
 
+static char g_device_serial[64] = "";
+
 static int parse_args(int argc, char **argv, int *gain, int *device,
                       int *test_mode) {
     *gain = 496;    /* 49.6 dB — max for ADS-B */
     *device = 0;
     *test_mode = 0;
+    g_device_serial[0] = '\0';
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--gain") == 0 && i + 1 < argc) {
             *gain = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
             *device = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--device-serial") == 0 && i + 1 < argc) {
+            strncpy(g_device_serial, argv[++i], sizeof(g_device_serial) - 1);
         } else if (strcmp(argv[i], "--test") == 0) {
             *test_mode = 1;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fprintf(stderr,
                 "groundlink_adsb — Fast C ADS-B decoder for GROUNDLINK\n\n"
                 "Usage: groundlink_adsb [options]\n"
-                "  --gain TENTH  Gain in tenths of dB (default: 496 = 49.6 dB)\n"
-                "  --device N    RTL-SDR device index (default: 0)\n"
-                "  --test        Test mode: synthetic messages, no hardware\n");
+                "  --gain TENTH         Gain in tenths of dB (default: 496 = 49.6 dB)\n"
+                "  --device N           RTL-SDR device index (default: 0)\n"
+                "  --device-serial SN   RTL-SDR device serial (overrides --device)\n"
+                "  --test               Test mode: synthetic messages, no hardware\n");
             return -1;
         }
     }
@@ -812,6 +818,19 @@ int main(int argc, char **argv) {
     rtlsdr_dev_t *dev = NULL;
 
     if (!test_mode) {
+        /* ── Resolve device serial to index ── */
+        if (g_device_serial[0] != '\0') {
+            int idx = rtlsdr_get_index_by_serial(g_device_serial);
+            if (idx < 0) {
+                fprintf(stderr, "ERROR: Device serial '%s' not found\n", g_device_serial);
+                free(raw_buf);
+                free(mag);
+                return 1;
+            }
+            fprintf(stderr, "Found device serial '%s' at index %d\n", g_device_serial, idx);
+            device = idx;
+        }
+
         /* ── Open RTL-SDR ── */
         uint32_t dev_count = rtlsdr_get_device_count();
         if (dev_count == 0) {
