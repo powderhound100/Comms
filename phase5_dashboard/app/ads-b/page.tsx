@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import AircraftMap from '@/components/AircraftMap'
 import type { TrackedAircraft, AdsbSources, PiHealth, PiSlot } from '@/data/scan-detect'
@@ -131,9 +131,13 @@ export default function ADSBPage() {
   const [aircraft, setAircraft] = useState<TrackedAircraft[]>([])
   const [trails, setTrails] = useState<Record<string, [number, number][]>>({})
   const [psdData, setPsdData] = useState<number[] | null>(null)
-  const [totalMsgs, setTotalMsgs] = useState(0)
-  const [msgRate, setMsgRate] = useState(0)
-  const [aircraftCount, setAircraftCount] = useState(0)
+  const totalMsgsRef = useRef(0)
+  const msgRateRef = useRef(0)
+  const aircraftCountRef = useRef(0)
+  // DOM refs for direct stat updates (bypass React re-render)
+  const totalMsgsEl = useRef<HTMLDivElement>(null)
+  const msgRateEl = useRef<HTMLDivElement>(null)
+  const aircraftCountEl = useRef<HTMLDivElement>(null)
   const [showReference, setShowReference] = useState(false)
   const [sortCol, setSortCol] = useState<string>('callsign')
   const [sortAsc, setSortAsc] = useState(true)
@@ -157,10 +161,12 @@ export default function ADSBPage() {
   const [testMode, setTestMode] = useState(false)
   const [gain, setGain] = useState(496)
 
-  // Dual-frequency state
+  // Dual-frequency state — refs for high-frequency updates, direct DOM
   const [psdData978, setPsdData978] = useState<number[] | null>(null)
-  const [source1090, setSource1090] = useState<AdsbSources['1090'] | null>(null)
-  const [source978, setSource978] = useState<AdsbSources['978'] | null>(null)
+  const source1090Ref = useRef<AdsbSources['1090'] | null>(null)
+  const source978Ref = useRef<AdsbSources['978'] | null>(null)
+  const source1090El = useRef<HTMLDivElement>(null)
+  const source978El = useRef<HTMLDivElement>(null)
 
   // Pi health state
   const [piHealth, setPiHealth] = useState<PiHealth | null>(null)
@@ -212,9 +218,12 @@ export default function ADSBPage() {
     setTrails({})
     trailsRef.current = {}
     setPsdData(null)
-    setTotalMsgs(0)
-    setMsgRate(0)
-    setAircraftCount(0)
+    totalMsgsRef.current = 0
+    msgRateRef.current = 0
+    aircraftCountRef.current = 0
+    if (totalMsgsEl.current) totalMsgsEl.current.textContent = '0'
+    if (msgRateEl.current) msgRateEl.current.textContent = '0.0/s'
+    if (aircraftCountEl.current) aircraftCountEl.current.textContent = '0'
   }, [sdrStop])
 
   // WebSocket connection — when adsb or adsb_dual mode is active
@@ -288,14 +297,26 @@ export default function ADSBPage() {
               })) return prev
               return acList
             })
-            setTotalMsgs(data.total_msgs ?? 0)
-            setMsgRate(data.msg_rate ?? 0)
-            setAircraftCount(data.aircraft_count ?? 0)
+            // Update stats via refs + direct DOM (no React re-render)
+            totalMsgsRef.current = data.total_msgs ?? 0
+            msgRateRef.current = data.msg_rate ?? 0
+            aircraftCountRef.current = data.aircraft_count ?? 0
+            if (totalMsgsEl.current) totalMsgsEl.current.textContent = totalMsgsRef.current.toLocaleString()
+            if (msgRateEl.current) msgRateEl.current.textContent = `${msgRateRef.current.toFixed(1)}/s`
+            if (aircraftCountEl.current) aircraftCountEl.current.textContent = String(aircraftCountRef.current)
 
-            // Parse dual-source metadata
+            // Parse dual-source metadata via refs + direct DOM
             if (data.sources) {
-              setSource1090(data.sources['1090'] || null)
-              setSource978(data.sources['978'] || null)
+              source1090Ref.current = data.sources['1090'] || null
+              source978Ref.current = data.sources['978'] || null
+              if (source1090El.current) {
+                const s = source1090Ref.current
+                source1090El.current.innerHTML = `<div class="w-2 h-2 rounded-full ${s?.connected ? 'bg-cyan-400' : 'bg-gray-600'}"></div><span class="text-sm font-bold text-cyan-400">${s?.aircraft_count ?? 0}</span><span class="text-xs text-gray-500">${(s?.msg_rate ?? 0).toFixed(0)}/s</span>`
+              }
+              if (source978El.current) {
+                const s = source978Ref.current
+                source978El.current.innerHTML = `<div class="w-2 h-2 rounded-full ${s?.connected ? 'bg-orange-400' : 'bg-gray-600'}"></div><span class="text-sm font-bold text-orange-400">${s?.aircraft_count ?? 0}</span><span class="text-xs text-gray-500">${(s?.msg_rate ?? 0).toFixed(0)}/s</span>`
+              }
             }
 
             // Update trails — only trigger re-render when a trail actually changed
@@ -341,8 +362,8 @@ export default function ADSBPage() {
     }
   }, [isAdsbActive])
 
-  // Sort aircraft for table
-  const sortedAircraft = [...aircraft].sort((a, b) => {
+  // Sort aircraft for table — memoized to avoid re-render from unrelated state changes
+  const sortedAircraft = useMemo(() => [...aircraft].sort((a, b) => {
     let av: string | number | null = null
     let bv: string | number | null = null
     switch (sortCol) {
@@ -359,7 +380,7 @@ export default function ADSBPage() {
     if (typeof av === 'string' && typeof bv === 'string')
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
     return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number)
-  })
+  }), [aircraft, sortCol, sortAsc])
 
   const handleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc)
@@ -429,35 +450,31 @@ export default function ADSBPage() {
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">1090 MHz</div>
-          <div className="flex items-center gap-2 mt-1">
-            <div className={`w-2 h-2 rounded-full ${source1090?.connected ? 'bg-cyan-400' : 'bg-gray-600'}`} />
-            <span className="text-sm font-bold text-cyan-400">
-              {source1090?.aircraft_count ?? aircraftCount}
-            </span>
-            <span className="text-xs text-gray-500">{(source1090?.msg_rate ?? msgRate).toFixed(0)}/s</span>
+          <div ref={source1090El} className="flex items-center gap-2 mt-1">
+            <div className="w-2 h-2 rounded-full bg-gray-600" />
+            <span className="text-sm font-bold text-cyan-400">0</span>
+            <span className="text-xs text-gray-500">0/s</span>
           </div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">978 MHz</div>
-          <div className="flex items-center gap-2 mt-1">
-            <div className={`w-2 h-2 rounded-full ${source978?.connected ? 'bg-orange-400' : 'bg-gray-600'}`} />
-            <span className="text-sm font-bold text-orange-400">
-              {source978?.aircraft_count ?? 0}
-            </span>
-            <span className="text-xs text-gray-500">{(source978?.msg_rate ?? 0).toFixed(0)}/s</span>
+          <div ref={source978El} className="flex items-center gap-2 mt-1">
+            <div className="w-2 h-2 rounded-full bg-gray-600" />
+            <span className="text-sm font-bold text-orange-400">0</span>
+            <span className="text-xs text-gray-500">0/s</span>
           </div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Aircraft</div>
-          <div className="text-lg font-bold text-cyan-400 mt-1">{aircraftCount}</div>
+          <div ref={aircraftCountEl} className="text-lg font-bold text-cyan-400 mt-1">0</div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Msg Rate</div>
-          <div className="text-lg font-bold text-cyan-400 mt-1">{msgRate.toFixed(1)}/s</div>
+          <div ref={msgRateEl} className="text-lg font-bold text-cyan-400 mt-1">0.0/s</div>
         </div>
         <div className="bg-gray-900 rounded-lg p-3 border border-gray-800">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total Msgs</div>
-          <div className="text-lg font-bold text-cyan-400 mt-1">{totalMsgs.toLocaleString()}</div>
+          <div ref={totalMsgsEl} className="text-lg font-bold text-cyan-400 mt-1">0</div>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef, useMemo, memo } from 'react'
 import type { TrackedAircraft } from '@/data/scan-detect'
 
 interface AircraftMapProps {
@@ -10,7 +10,7 @@ interface AircraftMapProps {
   height?: number
 }
 
-export default function AircraftMap({ aircraft, trails, height = 450 }: AircraftMapProps) {
+function AircraftMap({ aircraft, trails, height = 450 }: AircraftMapProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const leafletMap = useRef<any>(null)
   const markersRef = useRef<Map<string, any>>(new Map())
@@ -243,3 +243,5 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
     </div>
   )
 }
+
+export default memo(AircraftMap)

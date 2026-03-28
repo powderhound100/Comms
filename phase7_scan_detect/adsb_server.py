@@ -315,6 +315,8 @@ class DualAdsbServer:
             "1090": {"connected": False, "msg_rate": 0, "aircraft_count": 0},
             "978": {"connected": False, "msg_rate": 0, "aircraft_count": 0},
         }
+        # Merged aircraft table: ICAO -> aircraft dict (with source tag)
+        self.merged_aircraft: dict[str, dict] = {}
 
     async def start(self):
         await self.source_1090.start()
@@ -488,11 +490,35 @@ async def remote_frame_reader(source: RemoteAdsbSource, ac_log: AircraftLog,
                         except Exception as e:
                             logger.warning("[%s] DB log error: %s", source_label, e)
 
+                    # Merge into combined table: update this source's aircraft,
+                    # keep other source's aircraft intact
+                    merged = dual_server.merged_aircraft
+                    # Remove stale entries from THIS source only
+                    current_icaos = {ac["icao"] for ac in ac_list}
+                    stale = [k for k, v in merged.items()
+                             if v.get("source") == source_label and k not in current_icaos]
+                    for k in stale:
+                        del merged[k]
+                    # Update/add aircraft from this source
+                    for ac in ac_list:
+                        icao = ac["icao"]
+                        existing = merged.get(icao)
+                        if existing and existing.get("source") != source_label:
+                            ac["source"] = "both"
+                        merged[icao] = ac
+
+                    # Broadcast merged list
+                    merged_list = list(merged.values())
+                    total_rate = sum(
+                        s.get("msg_rate", 0) for s in dual_server.source_stats.values()
+                    )
                     await broadcast(json.dumps({
                         "type": "aircraft",
-                        "source": source_label,
                         "sources": dual_server.source_stats,
-                        **data,
+                        "aircraft_count": len(merged_list),
+                        "msg_rate": total_rate,
+                        "total_msgs": data.get("total_msgs", 0),
+                        "aircraft": merged_list,
                     }))
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
                     logger.warning("[%s] Bad JSON in D frame: %s", source_label, e)
