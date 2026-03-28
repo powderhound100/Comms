@@ -199,7 +199,16 @@ export default function ScanDetectPage() {
       if (data.protocol === 'adsb' && data.decoded_data?.aircraft_table) {
         const table = data.decoded_data.aircraft_table as Record<string, TrackedAircraft>
         const acList = Object.values(table)
-        setAircraft(acList)
+        // Stable state update — return same reference when data unchanged
+        setAircraft(prev => {
+          if (prev.length === acList.length && prev.every((p, i) => {
+            const n = acList[i]
+            return p.icao_hex === n.icao_hex && p.latitude === n.latitude &&
+              p.longitude === n.longitude && p.altitude_ft === n.altitude_ft &&
+              p.callsign === n.callsign
+          })) return prev
+          return acList
+        })
 
         setTrails(prev => {
           const next = { ...prev }

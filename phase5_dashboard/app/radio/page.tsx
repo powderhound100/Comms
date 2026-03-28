@@ -368,7 +368,12 @@ export default function RadioPage() {
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'spectrum') {
-            setPsdData(data.psd_dbfs)
+            // Shallow compare to avoid re-renders when spectrum data unchanged
+            setPsdData(prev => {
+              const next = data.psd_dbfs
+              if (prev && next && prev.length === next.length && prev.every((v: number, i: number) => v === next[i])) return prev
+              return next
+            })
             if (data.psd_dbfs?.length) {
               setSignalStrength(Math.max(...data.psd_dbfs))
             }

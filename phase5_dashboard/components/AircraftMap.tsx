@@ -15,6 +15,7 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
   const leafletMap = useRef<any>(null)
   const markersRef = useRef<Map<string, any>>(new Map())
   const trailLinesRef = useRef<Map<string, any>>(new Map())
+  const markerStateRef = useRef<Map<string, { heading: number; altitude: number | null; source: string | undefined }>>(new Map())
   const LRef = useRef<any>(null)
 
   // Compute map center from aircraft positions
@@ -123,10 +124,14 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
       ].filter(Boolean).join(' | ')
 
       if (markersRef.current.has(ac.icao_hex)) {
-        // Update existing marker
+        // Update existing marker — only recreate icon when visual state changes
         const marker = markersRef.current.get(ac.icao_hex)
         marker.setLatLng(pos)
-        marker.setIcon(icon)
+        const cached = markerStateRef.current.get(ac.icao_hex)
+        if (!cached || cached.heading !== rotation || cached.altitude !== ac.altitude_ft || cached.source !== ac.source) {
+          marker.setIcon(icon)
+          markerStateRef.current.set(ac.icao_hex, { heading: rotation, altitude: ac.altitude_ft ?? null, source: ac.source })
+        }
         marker.setTooltipContent(tooltip)
       } else {
         // Create new marker
@@ -139,6 +144,7 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
             className: 'aircraft-tooltip',
           })
         markersRef.current.set(ac.icao_hex, marker)
+        markerStateRef.current.set(ac.icao_hex, { heading: rotation, altitude: ac.altitude_ft ?? null, source: ac.source })
       }
 
       // Draw trajectory trail
@@ -163,6 +169,7 @@ export default function AircraftMap({ aircraft, trails, height = 450 }: Aircraft
       if (!currentICAOs.has(icao)) {
         map.removeLayer(marker)
         markersRef.current.delete(icao)
+        markerStateRef.current.delete(icao)
       }
     })
     trailLinesRef.current.forEach((line, icao) => {

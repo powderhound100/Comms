@@ -276,7 +276,18 @@ export default function ADSBPage() {
               source: a.source ?? '1090',
             }))
 
-            setAircraft(acList)
+            // Stable state update — return same reference when data unchanged
+            setAircraft(prev => {
+              if (prev.length === acList.length && prev.every((p, i) => {
+                const n = acList[i]
+                return p.icao_hex === n.icao_hex && p.latitude === n.latitude &&
+                  p.longitude === n.longitude && p.altitude_ft === n.altitude_ft &&
+                  p.callsign === n.callsign && p.heading_deg === n.heading_deg &&
+                  p.ground_speed_kt === n.ground_speed_kt &&
+                  p.vertical_rate_fpm === n.vertical_rate_fpm && p.source === n.source
+              })) return prev
+              return acList
+            })
             setTotalMsgs(data.total_msgs ?? 0)
             setMsgRate(data.msg_rate ?? 0)
             setAircraftCount(data.aircraft_count ?? 0)
@@ -287,26 +298,28 @@ export default function ADSBPage() {
               setSource978(data.sources['978'] || null)
             }
 
-            // Update trails
+            // Update trails — only trigger re-render when a trail actually changed
             const newTrails = { ...trailsRef.current }
+            let trailsChanged = false
             for (const ac of acList) {
               if (ac.latitude != null && ac.longitude != null) {
-                if (!newTrails[ac.icao_hex]) newTrails[ac.icao_hex] = []
+                if (!newTrails[ac.icao_hex]) { newTrails[ac.icao_hex] = []; trailsChanged = true }
                 const trail = newTrails[ac.icao_hex]
                 const last = trail[trail.length - 1]
                 if (!last || last[0] !== ac.latitude || last[1] !== ac.longitude) {
                   trail.push([ac.latitude, ac.longitude])
                   if (trail.length > 100) trail.shift()
+                  trailsChanged = true
                 }
               }
             }
             // Remove trails for aircraft no longer in list
             const activeIcaos = new Set(acList.map(a => a.icao_hex))
             for (const icao of Object.keys(newTrails)) {
-              if (!activeIcaos.has(icao)) delete newTrails[icao]
+              if (!activeIcaos.has(icao)) { delete newTrails[icao]; trailsChanged = true }
             }
             trailsRef.current = newTrails
-            setTrails({ ...newTrails })
+            if (trailsChanged) setTrails({ ...newTrails })
 
           } else if (data.type === 'spectrum') {
             if (data.center_freq_hz === 978000000) {
