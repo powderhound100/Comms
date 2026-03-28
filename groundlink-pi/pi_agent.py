@@ -319,12 +319,21 @@ class PiAgentApp:
             self.slots[i] = SlotManager(i, slot_cfg, config)
 
     async def auto_start(self):
-        """Auto-start slots marked auto_start=true in config."""
+        """Auto-start slots marked auto_start=true in config.
+
+        Staggers startup by 3 seconds between slots to avoid libusb
+        claim_interface race conditions when multiple SDRs open simultaneously.
+        """
+        first = True
         for slot_id, slot in self.slots.items():
             cfg = self.config.get("sdr", {}).get(str(slot_id), {})
             if cfg.get("auto_start", False):
                 mode = cfg.get("default_mode")
                 if mode:
+                    if not first:
+                        logger.info("Waiting 3s before starting next slot...")
+                        await asyncio.sleep(3)
+                    first = False
                     logger.info("Auto-starting slot %d in mode %s", slot_id, mode)
                     try:
                         await slot.start(mode, cfg)
