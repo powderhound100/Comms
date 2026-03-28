@@ -113,7 +113,10 @@ sudo -u "$PI_USER" "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt
 # ── Step 8: Systemd Service ──────────────────────
 echo ""
 echo "[8/8] Installing systemd service..."
-cp "$INSTALL_DIR/systemd/groundlink-pi.service" /etc/systemd/system/
+# Patch service file with actual username (default template uses 'pi')
+sed "s/User=pi/User=$PI_USER/; s/Group=pi/Group=$PI_USER/" \
+    "$INSTALL_DIR/systemd/groundlink-pi.service" \
+    > /etc/systemd/system/groundlink-pi.service
 systemctl daemon-reload
 systemctl enable groundlink-pi
 
