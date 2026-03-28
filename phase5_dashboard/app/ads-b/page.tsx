@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import AircraftMap from '@/components/AircraftMap'
+import SpectrumPanel from '@/components/SpectrumPanel'
+import ExpandModal from '@/components/ExpandModal'
 import type { TrackedAircraft, AdsbSources, PiHealth, PiSlot } from '@/data/scan-detect'
 
 const FlightPathModal = dynamic(() => import('@/components/FlightPathModal'), { ssr: false })
@@ -17,101 +19,6 @@ import {
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
 import SdrModeBar from '@/components/SdrModeBar'
 import { useSdr } from '@/hooks/use-sdr'
-
-// ── Spectrum canvas hook (same pattern as radio page) ──
-
-function useSpectrumCanvas(
-  canvasRef: React.RefObject<HTMLCanvasElement | null>,
-  psdData: number[] | null,
-  centerFreq: number,
-  bandwidth: number,
-) {
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !psdData || psdData.length === 0) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const w = canvas.width
-    const h = canvas.height
-    const minDb = -80
-    const maxDb = -20
-
-    ctx.fillStyle = '#0a0e14'
-    ctx.fillRect(0, 0, w, h)
-
-    // Grid
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)'
-    ctx.lineWidth = 1
-    for (let i = 1; i < 6; i++) {
-      const y = (i / 6) * h
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke()
-    }
-    for (let i = 1; i < 8; i++) {
-      const x = (i / 8) * w
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke()
-    }
-
-    // Fill gradient
-    const gradient = ctx.createLinearGradient(0, 0, 0, h)
-    gradient.addColorStop(0, 'rgba(56, 189, 248, 0.5)')
-    gradient.addColorStop(0.5, 'rgba(52, 211, 153, 0.3)')
-    gradient.addColorStop(1, 'rgba(52, 211, 153, 0)')
-
-    ctx.beginPath()
-    ctx.moveTo(0, h)
-    for (let i = 0; i < psdData.length; i++) {
-      const x = (i / psdData.length) * w
-      const norm = Math.max(0, Math.min(1, (psdData[i] - minDb) / (maxDb - minDb)))
-      const y = h - norm * h * 0.9
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.lineTo(w, h)
-    ctx.closePath()
-    ctx.fillStyle = gradient
-    ctx.fill()
-
-    // Spectrum line
-    ctx.beginPath()
-    for (let i = 0; i < psdData.length; i++) {
-      const x = (i / psdData.length) * w
-      const norm = Math.max(0, Math.min(1, (psdData[i] - minDb) / (maxDb - minDb)))
-      const y = h - norm * h * 0.9
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
-
-    // Center marker
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)'
-    ctx.lineWidth = 1
-    ctx.setLineDash([4, 4])
-    ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke()
-    ctx.setLineDash([])
-
-    // Freq labels
-    ctx.fillStyle = 'rgba(156, 163, 175, 0.5)'
-    ctx.font = '10px monospace'
-    ctx.textAlign = 'center'
-    const startMhz = (centerFreq - bandwidth / 2) / 1e6
-    const stopMhz = (centerFreq + bandwidth / 2) / 1e6
-    for (let i = 0; i <= 4; i++) {
-      const f = startMhz + (stopMhz - startMhz) * (i / 4)
-      ctx.fillText(f.toFixed(2), (i / 4) * w, h - 4)
-    }
-
-    // dB scale
-    ctx.textAlign = 'left'
-    for (let db = minDb; db <= maxDb; db += 20) {
-      const norm = (db - minDb) / (maxDb - minDb)
-      const y = h - norm * h * 0.9
-      ctx.fillText(`${db}`, 4, y - 2)
-    }
-  }, [canvasRef, psdData, centerFreq, bandwidth])
-}
 
 // ── Row helper ──
 
@@ -171,13 +78,11 @@ export default function ADSBPage() {
   // Pi health state
   const [piHealth, setPiHealth] = useState<PiHealth | null>(null)
 
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const canvas978Ref = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const trailsRef = useRef<Record<string, [number, number][]>>({})
 
-  useSpectrumCanvas(canvasRef, psdData, 1090e6, 2e6)
-  useSpectrumCanvas(canvas978Ref, psdData978, 978e6, 2.083e6)
+  // Expand modal state
+  const [expandedPanel, setExpandedPanel] = useState<'map' | '1090' | '978' | null>(null)
 
   // Poll aircraft log
   useEffect(() => {
@@ -482,58 +387,78 @@ export default function ADSBPage() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
           <span className="text-sm font-medium text-gray-300">Aircraft Map</span>
-          <span className="text-xs text-gray-500 font-mono">{aircraft.filter(a => a.latitude != null).length} with position</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 font-mono">{aircraft.filter(a => a.latitude != null).length} with position</span>
+            <button onClick={() => setExpandedPanel('map')} className="text-gray-500 hover:text-gray-200 transition-colors" title="Expand map">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            </button>
+          </div>
         </div>
         <AircraftMap aircraft={aircraft} trails={trails} height={500} />
       </div>
 
       {/* 1090 MHz Spectrum */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
-        <div className="px-4 py-2 border-b border-gray-800">
-          <span className="text-sm font-medium text-gray-300">1090 MHz Spectrum</span>
-          <span className="text-xs text-gray-500 ml-3 font-mono">2 MHz bandwidth</span>
+        <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-300">1090 MHz Spectrum</span>
+            <span className="text-xs text-gray-500 ml-3 font-mono">2 MHz bandwidth</span>
+          </div>
+          <button onClick={() => setExpandedPanel('1090')} className="text-gray-500 hover:text-gray-200 transition-colors" title="Expand spectrum">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          </button>
         </div>
-        <div className="relative">
-          <canvas
-            ref={canvasRef}
-            width={1024}
-            height={180}
-            className="w-full block"
-            style={{ imageRendering: 'pixelated' }}
-          />
-          {!psdData && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-xs text-gray-600 font-mono">
-                {connected ? 'Waiting for spectrum data...' : 'Connect to see 1090 MHz spectrum'}
-              </span>
-            </div>
-          )}
-        </div>
+        <SpectrumPanel
+          psdData={psdData}
+          centerFreq={1090e6}
+          bandwidth={2e6}
+          label="1090 MHz"
+          color="cyan"
+          height={180}
+          connected={connected}
+          emptyMessage="Connect to see 1090 MHz spectrum"
+        />
       </div>
 
       {/* 978 MHz Spectrum */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
-        <div className="px-4 py-2 border-b border-gray-800">
-          <span className="text-sm font-medium text-orange-300">978 MHz UAT Spectrum</span>
-          <span className="text-xs text-gray-500 ml-3 font-mono">2.08 MHz bandwidth</span>
+        <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-orange-300">978 MHz UAT Spectrum</span>
+            <span className="text-xs text-gray-500 ml-3 font-mono">2.08 MHz bandwidth</span>
+          </div>
+          <button onClick={() => setExpandedPanel('978')} className="text-gray-500 hover:text-gray-200 transition-colors" title="Expand spectrum">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          </button>
         </div>
-        <div className="relative">
-          <canvas
-            ref={canvas978Ref}
-            width={1024}
-            height={140}
-            className="w-full block"
-            style={{ imageRendering: 'pixelated' }}
-          />
-          {!psdData978 && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-xs text-gray-600 font-mono">
-                {connected ? 'Waiting for 978 MHz data...' : 'Connect to see UAT spectrum'}
-              </span>
-            </div>
-          )}
-        </div>
+        <SpectrumPanel
+          psdData={psdData978}
+          centerFreq={978e6}
+          bandwidth={2.083e6}
+          label="978 MHz"
+          color="orange"
+          height={140}
+          connected={connected}
+          emptyMessage="Connect to see UAT spectrum"
+        />
       </div>
+
+      {/* Expand Modals */}
+      {expandedPanel === 'map' && (
+        <ExpandModal title="Aircraft Tracking Map" subtitle={`${aircraft.filter(a => a.latitude != null).length} aircraft with position`} onClose={() => setExpandedPanel(null)}>
+          <AircraftMap aircraft={aircraft} trails={trails} height={700} />
+        </ExpandModal>
+      )}
+      {expandedPanel === '1090' && (
+        <ExpandModal title="1090 MHz Spectrum" subtitle="2 MHz bandwidth" onClose={() => setExpandedPanel(null)}>
+          <SpectrumPanel psdData={psdData} centerFreq={1090e6} bandwidth={2e6} label="1090 MHz" color="cyan" height={450} connected={connected} emptyMessage="Connect to see 1090 MHz spectrum" />
+        </ExpandModal>
+      )}
+      {expandedPanel === '978' && (
+        <ExpandModal title="978 MHz UAT Spectrum" subtitle="2.08 MHz bandwidth" onClose={() => setExpandedPanel(null)}>
+          <SpectrumPanel psdData={psdData978} centerFreq={978e6} bandwidth={2.083e6} label="978 MHz" color="orange" height={450} connected={connected} emptyMessage="Connect to see UAT spectrum" />
+        </ExpandModal>
+      )}
 
       {/* Aircraft Table */}
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
