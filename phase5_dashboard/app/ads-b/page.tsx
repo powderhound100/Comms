@@ -616,7 +616,7 @@ export default function ADSBPage() {
             </div>
           </div>
           <div className="p-4 space-y-2">
-            {piHealth.slots.map(slot => (
+            {Object.values(piHealth.slots ?? {}).map((slot: any) => (
               <div key={slot.id} className="flex items-center gap-3 text-sm">
                 <span className="text-gray-500 w-14">Slot {slot.id}</span>
                 <span className="font-mono text-gray-300 w-28">{slot.mode ?? 'idle'}</span>
