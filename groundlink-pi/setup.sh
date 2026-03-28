@@ -31,9 +31,16 @@ apt-get install -y \
     libitpp-dev \
     libsndfile1-dev
 
-# ── Step 2: Blacklist DVB-T Kernel Driver ─────────
+# ── Step 2: Install Directory ─────────────────────
 echo ""
-echo "[2/8] Blacklisting conflicting DVB-T kernel driver..."
+echo "[2/8] Setting up $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR"
+cp -r . "$INSTALL_DIR/"
+chown -R "$PI_USER:$PI_USER" "$INSTALL_DIR"
+
+# ── Step 3: Blacklist DVB-T Kernel Driver ─────────
+echo ""
+echo "[3/8] Blacklisting conflicting DVB-T kernel driver..."
 cat > /etc/modprobe.d/blacklist-rtlsdr.conf << 'MODCONF'
 # Prevent kernel DVB-T driver from claiming RTL-SDR devices
 blacklist dvb_usb_rtl28xxu
@@ -44,19 +51,12 @@ blacklist dvb_core
 MODCONF
 modprobe -r dvb_usb_rtl28xxu 2>/dev/null || true
 
-# ── Step 3: udev Rules (non-root SDR access) ─────
+# ── Step 4: udev Rules (non-root SDR access) ─────
 echo ""
-echo "[3/8] Installing udev rules for non-root SDR access..."
+echo "[4/8] Installing udev rules for non-root SDR access..."
 cp "$INSTALL_DIR/udev/99-rtlsdr.rules" /etc/udev/rules.d/
 udevadm control --reload-rules
 udevadm trigger
-
-# ── Step 4: Install Directory ─────────────────────
-echo ""
-echo "[4/8] Setting up $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
-cp -r . "$INSTALL_DIR/"
-chown -R "$PI_USER:$PI_USER" "$INSTALL_DIR"
 
 # ── Step 5: Build C Decoders ─────────────────────
 echo ""
