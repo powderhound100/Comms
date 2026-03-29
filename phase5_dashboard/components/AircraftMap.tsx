@@ -2,20 +2,24 @@
 
 import { useEffect, useRef, useMemo, memo } from 'react'
 import type { TrackedAircraft } from '@/data/scan-detect'
+import { pnwAirports, pnwGroundStations } from '@/data/pnw-stations'
 
 interface AircraftMapProps {
   aircraft: TrackedAircraft[]
   /** Trail history: ICAO → array of [lat, lon] positions */
   trails: Record<string, [number, number][]>
   height?: number
+  /** Show airport and ground station overlays */
+  showStations?: boolean
 }
 
-function AircraftMap({ aircraft, trails, height = 450 }: AircraftMapProps) {
+function AircraftMap({ aircraft, trails, height = 450, showStations = true }: AircraftMapProps) {
   const mapRef = useRef<HTMLDivElement>(null)
   const leafletMap = useRef<any>(null)
   const markersRef = useRef<Map<string, any>>(new Map())
   const trailLinesRef = useRef<Map<string, any>>(new Map())
   const markerStateRef = useRef<Map<string, { heading: number; altitude: number | null; source: string | undefined }>>(new Map())
+  const stationMarkersRef = useRef<any[]>([])
   const LRef = useRef<any>(null)
 
   // Compute map center from aircraft positions
@@ -60,11 +64,34 @@ function AircraftMap({ aircraft, trails, height = 450 }: AircraftMapProps) {
       }).addTo(map)
 
       leafletMap.current = map
+
+      // Add airport and ground station markers
+      if (showStations) {
+        const allStations = [...pnwAirports, ...pnwGroundStations]
+        allStations.forEach(station => {
+          const isAirport = station.type === 'airport'
+          const color = isAirport ? '#6b7280' : '#f59e0b'  // gray for airports, amber for GBTs
+          const size = isAirport ? 6 : 8
+          const icon = L.divIcon({
+            html: `<div style="width:${size}px;height:${size}px;border-radius:${isAirport ? '1px' : '50%'};background:${color};border:1px solid ${isAirport ? '#4b5563' : '#d97706'};opacity:0.7"></div>`,
+            className: '',
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2],
+          })
+          const marker = L.marker([station.lat, station.lon], { icon, interactive: true })
+            .addTo(map)
+            .bindTooltip(
+              `<b>${station.code || station.id}</b><br/>${station.name}${station.info ? '<br/><span style="color:#9ca3af">' + station.info + '</span>' : ''}`,
+              { permanent: false, direction: 'right', offset: [8, 0], className: 'aircraft-tooltip' }
+            )
+          stationMarkersRef.current.push(marker)
+        })
+      }
     }
 
     initMap()
     return () => { cancelled = true }
-  }, [center])
+  }, [center, showStations])
 
   // Update markers and trails when aircraft data changes
   useEffect(() => {

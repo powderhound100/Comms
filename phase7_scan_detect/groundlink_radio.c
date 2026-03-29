@@ -160,7 +160,7 @@ static void compute_spectrum(const float *iq_i, const float *iq_q,
 
 /* ── FIR low-pass filter coefficients (32-tap, normalized sinc) ── */
 
-#define FIR_TAPS 32
+#define FIR_TAPS 64
 
 static void make_lowpass_fir(float *h, int taps, float cutoff) {
     /* cutoff: fraction of sample rate (0..0.5) */
@@ -256,6 +256,21 @@ static void deemphasis(float *audio, int n, float alpha, float *state) {
         audio[i] = prev;
     }
     *state = prev;
+}
+
+/* DC-blocking filter: y[n] = x[n] - x[n-1] + R * y[n-1]
+   R ≈ 1 - 2π·fc/fs,  fc = cutoff Hz, fs = sample rate.
+   For fc=5 Hz @ 48kHz → R ≈ 0.99935; fc=5 Hz @ 16kHz → R ≈ 0.998 */
+static void dc_block(float *audio, int n, float R, float *x_prev, float *y_prev) {
+    float xp = *x_prev, yp = *y_prev;
+    for (int i = 0; i < n; i++) {
+        float x = audio[i];
+        yp = x - xp + R * yp;
+        xp = x;
+        audio[i] = yp;
+    }
+    *x_prev = xp;
+    *y_prev = yp;
 }
 
 /* ── Write a binary frame to stdout ──────────────────────────── */
@@ -438,6 +453,9 @@ int main(int argc, char **argv) {
     /* AM: running DC removal and AGC state (persist across blocks) */
     float am_dc = 0.0f;        /* IIR DC estimator */
     float agc_peak = (mode == MODE_WFM) ? 0.5f : 0.01f;  /* WFM: mid-range avoids initial transient; AM/NFM: low start for weak signals */
+
+    /* DC block state */
+    float dcb_x_prev = 0.0f, dcb_y_prev = 0.0f;
 
     /* Squelch state (AM/NFM) */
     float noise_floor = 0.05f; /* IIR noise floor estimator */
@@ -656,6 +674,12 @@ int main(int argc, char **argv) {
             if (n3 >= FIR_TAPS) {
                 memcpy(hist_audio, audio + n3 - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
+        }
+
+        /* DC block: remove sub-5 Hz drift / popping (skip DISC — raw symbols) */
+        if (mode != MODE_DISC) {
+            float R = 1.0f - (2.0f * PI_F * 5.0f / (float)audio_rate);
+            dc_block(audio_dec, n_audio, R, &dcb_x_prev, &dcb_y_prev);
         }
 
         /* ── Normalize + convert to int16 PCM ── */
