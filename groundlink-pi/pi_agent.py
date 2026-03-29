@@ -113,6 +113,7 @@ class SlotManager:
             "uptime_s": round(time.time() - self.started_at, 1) if self.started_at and self.running else None,
             "restart_count": self.restart_count,
             "log_lines": len(self.log_buffer),
+            "config": self.mode_config,
         }
 
     def _build_command(self, mode: str, cfg: dict) -> list[str]:

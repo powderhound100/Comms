@@ -554,7 +554,7 @@ export default function ADSBPage() {
         </div>
       </div>
 
-      {/* Pi Status */}
+      {/* Pi Status + Gain Controls */}
       {piHealth && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
           <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
@@ -571,7 +571,7 @@ export default function ADSBPage() {
               </span>
             </div>
           </div>
-          <div className="p-4 space-y-2">
+          <div className="p-4 space-y-3">
             {Object.values(piHealth.slots ?? {}).map((slot: any) => (
               <div key={slot.id} className="flex items-center gap-3 text-sm">
                 <span className="text-gray-500 w-14">Slot {slot.id}</span>
@@ -581,11 +581,51 @@ export default function ADSBPage() {
                   slot.status === 'error' ? 'bg-red-400' :
                   'bg-gray-600'
                 }`} />
-                <span className="text-xs text-gray-400">{slot.status}</span>
+                <span className="text-xs text-gray-400 w-16">{slot.status}</span>
                 {slot.uptime_s > 0 && (
-                  <span className="text-xs text-gray-500 font-mono">
-                    {Math.floor(slot.uptime_s / 3600)}h {Math.floor((slot.uptime_s % 3600) / 60)}m
+                  <span className="text-xs text-gray-500 font-mono w-16">
+                    {Math.floor(slot.uptime_s / 3600)}h{Math.floor((slot.uptime_s % 3600) / 60)}m
                   </span>
+                )}
+                {/* Gain control */}
+                {slot.mode && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <label className="text-[10px] text-gray-500 uppercase">Gain</label>
+                    <input
+                      type="range"
+                      min="0" max="496" step="10"
+                      defaultValue={slot.config?.gain ?? 100}
+                      className="w-24 h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer accent-cyan-500"
+                      onMouseUp={(e) => {
+                        const newGain = parseInt((e.target as HTMLInputElement).value)
+                        fetch(`/api/pi/sdr/${slot.id}/start`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
+                        })
+                      }}
+                      onTouchEnd={(e) => {
+                        const newGain = parseInt((e.target as HTMLInputElement).value)
+                        fetch(`/api/pi/sdr/${slot.id}/start`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
+                        })
+                      }}
+                    />
+                    <span className="text-xs font-mono text-gray-400 w-12 text-right"
+                      ref={(el) => {
+                        if (!el) return
+                        const slider = el.previousElementSibling as HTMLInputElement
+                        if (slider) {
+                          el.textContent = `${(parseInt(slider.value) / 10).toFixed(1)}dB`
+                          slider.oninput = () => { el.textContent = `${(parseInt(slider.value) / 10).toFixed(1)}dB` }
+                        }
+                      }}
+                    >
+                      {((slot.config?.gain ?? 100) / 10).toFixed(1)}dB
+                    </span>
+                  </div>
                 )}
               </div>
             ))}
