@@ -21,10 +21,9 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: groundlink-tunnel
     restart: unless-stopped
+    network_mode: host
     command: tunnel --config /etc/cloudflared/config.yml run groundlink
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - groundlink-dashboard
