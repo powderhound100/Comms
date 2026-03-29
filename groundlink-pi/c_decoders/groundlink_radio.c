@@ -158,9 +158,9 @@ static void compute_spectrum(const float *iq_i, const float *iq_q,
     }
 }
 
-/* ── FIR low-pass filter coefficients (32-tap, normalized sinc) ── */
+/* ── FIR low-pass filter coefficients (64-tap, normalized sinc) ── */
 
-#define FIR_TAPS 32
+#define FIR_TAPS 64
 
 static void make_lowpass_fir(float *h, int taps, float cutoff) {
     /* cutoff: fraction of sample rate (0..0.5) */
@@ -245,6 +245,22 @@ static int decimate_real(const float *in, int n_in,
     }
     if (phase) *phase = i - n_in;
     return n_out;
+}
+
+/* ── DC blocking filter: y[n] = x[n] - x[n-1] + R*y[n-1] ──── */
+/* High-pass at ~20 Hz; removes DC wander that causes low-freq pops */
+
+static void dc_block(float *audio, int n, float *x_prev, float *y_prev) {
+    float R = 0.9985f;  /* pole at ~23 Hz @ 48k */
+    float xp = *x_prev, yp = *y_prev;
+    for (int i = 0; i < n; i++) {
+        float x = audio[i];
+        yp = x - xp + R * yp;
+        xp = x;
+        audio[i] = yp;
+    }
+    *x_prev = xp;
+    *y_prev = yp;
 }
 
 /* ── De-emphasis IIR: y[n] = y[n-1] + alpha*(x[n] - y[n-1]) ── */
@@ -432,8 +448,14 @@ int main(int argc, char **argv) {
     /* De-emphasis state */
     float deemph_state = 0.0f;
 
+    /* DC blocking filter state */
+    float dc_block_xprev = 0.0f, dc_block_yprev = 0.0f;
+
     /* FM demod prev sample */
     float prev_i = 0.0f, prev_q = 0.0f;
+
+    /* AGC gain smoothing: previous block's final scale for interpolation */
+    float prev_scale = 0.0f;
 
     /* AM: running DC removal and AGC state (persist across blocks) */
     float am_dc = 0.0f;        /* IIR DC estimator */
@@ -518,6 +540,9 @@ int main(int argc, char **argv) {
             if (n_dec >= FIR_TAPS) {
                 memcpy(hist_audio, audio + n_dec - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
+
+            /* DC blocking: removes discriminator DC wander → kills low-freq pops */
+            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
 
             /* De-emphasis: 75 μs (North America WFM) */
             float alpha = 1.0f - expf(-1.0f / (48000.0f * 75e-6f));
@@ -713,12 +738,19 @@ int main(int argc, char **argv) {
             if (squelch_gate < 0.01f) squelch_gate = 0.0f;
         }
 
+        /* Per-sample gain interpolation: ramp from previous block's scale
+         * to this block's scale to avoid discontinuities (pops) at boundaries */
+        float cur_scale = scale * squelch_gate;
+        if (prev_scale == 0.0f) prev_scale = cur_scale;  /* first block */
         for (int i = 0; i < n_audio; i++) {
-            float s = audio_dec[i] * scale * squelch_gate;
+            float t = (float)i / (float)n_audio;
+            float g = prev_scale + t * (cur_scale - prev_scale);
+            float s = audio_dec[i] * g;
             if (s > 32767.0f) s = 32767.0f;
             if (s < -32768.0f) s = -32768.0f;
             pcm[i] = (int16_t)s;
         }
+        prev_scale = cur_scale;
 
         } /* end !MODE_DISC */
 
