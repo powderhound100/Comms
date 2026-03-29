@@ -500,7 +500,7 @@ int main(int argc, char **argv) {
 
     /* NCO mixer state for DC offset tuning */
     float mixer_phase = 0.0f;
-    float phase_inc = -2.0f * PI_F * (float)g_dc_offset / (float)rate;
+    float phase_inc = 2.0f * PI_F * (float)g_dc_offset / (float)rate;
     float rot_cos = cosf(phase_inc);
     float rot_sin = sinf(phase_inc);
 
