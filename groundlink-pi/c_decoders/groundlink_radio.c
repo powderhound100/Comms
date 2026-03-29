@@ -251,7 +251,7 @@ static int decimate_real(const float *in, int n_in,
 /* High-pass at ~20 Hz; removes DC wander that causes low-freq pops */
 
 static void dc_block(float *audio, int n, float *x_prev, float *y_prev) {
-    float R = 0.997f;   /* pole at ~46 Hz @ 48k — more aggressive pop suppression */
+    float R = 0.9985f;  /* pole at ~23 Hz @ 48k */
     float xp = *x_prev, yp = *y_prev;
     for (int i = 0; i < n; i++) {
         float x = audio[i];
@@ -548,12 +548,15 @@ int main(int argc, char **argv) {
                 memcpy(hist_audio, audio + n_dec - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
 
-            /* DC blocking: removes discriminator DC wander → kills low-freq pops */
-            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
-
-            /* De-emphasis: 75 μs (North America WFM) */
-            float alpha = 1.0f - expf(-1.0f / (48000.0f * 75e-6f));
-            deemphasis(audio_dec, n_audio, alpha, &deemph_state);
+            /* Frequency-aware filtering:
+             * FM broadcast (88-108 MHz): DC block + 75μs de-emphasis
+             * Other bands: skip DC block (can attenuate weak signals) */
+            int is_fm_broadcast = (freq >= 88000000 && freq <= 108000000);
+            if (is_fm_broadcast) {
+                dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
+                float alpha = 1.0f - expf(-1.0f / (48000.0f * 75e-6f));
+                deemphasis(audio_dec, n_audio, alpha, &deemph_state);
+            }
 
         } else if (mode == MODE_NFM) {
             /*
@@ -614,12 +617,12 @@ int main(int argc, char **argv) {
                 memcpy(hist_audio, audio + n3 - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
 
-            /* DC blocking: removes discriminator DC wander → kills low-freq pops */
-            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
-
-            /* De-emphasis: 50 μs (NFM) */
-            float alpha = 1.0f - expf(-1.0f / (16000.0f * 50e-6f));
-            deemphasis(audio_dec, n_audio, alpha, &deemph_state);
+            /* De-emphasis for land mobile/weather NFM (not aviation) */
+            int is_aviation = (freq >= 118000000 && freq <= 137000000);
+            if (!is_aviation) {
+                float alpha = 1.0f - expf(-1.0f / (16000.0f * 50e-6f));
+                deemphasis(audio_dec, n_audio, alpha, &deemph_state);
+            }
 
         } else if (mode == MODE_DISC) {
             /*
@@ -669,9 +672,6 @@ int main(int argc, char **argv) {
 
             n_audio = n3;
             audio_rate = 48000;
-
-            /* DC blocking for discriminator output */
-            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
 
         } else {  /* MODE_AM */
             /*
