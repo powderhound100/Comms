@@ -234,7 +234,7 @@ function useSpectrumCanvas(
 // ──────────────────────────────────────────────────────────────
 
 export default function RadioPage() {
-  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('radio')
+  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop, adsbDualActive } = useSdr('radio')
 
   const [freq, setFreq] = useState(94.9e6)
   const [mode, setMode] = useState<'wfm' | 'nfm' | 'am' | 'p25'>('wfm')
@@ -439,6 +439,7 @@ export default function RadioPage() {
         uptime={sdrStatus.uptime_s}
         log={sdrStatus.log}
         onStart={handleSdrStart}
+        piDualMode={adsbDualActive}
         onStop={sdrStop}
       />
 

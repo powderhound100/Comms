@@ -106,7 +106,7 @@ function protocolBadge(protocol: string | null) {
 }
 
 export default function ScanDetectPage() {
-  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('scanner')
+  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop, adsbDualActive } = useSdr('scanner')
 
   const [status, setStatus] = useState<ScannerStatus>({
     running: false,
@@ -418,6 +418,7 @@ export default function ScanDetectPage() {
         log={sdrStatus.log}
         onStart={() => sdrStart({ mock: false, mode: scanMode })}
         onStop={sdrStop}
+        piDualMode={adsbDualActive}
       />
 
       {/* Stat Cards */}

@@ -27,13 +27,15 @@ interface SdrModeBarProps {
   log: string[]
   onStart: () => void
   onStop: () => void
+  /** When true, this mode runs on Pi slot 2 alongside adsb_dual */
+  piDualMode?: boolean
   /** Extra controls rendered inline (e.g. gain, test mode) */
   children?: React.ReactNode
 }
 
 export default function SdrModeBar({
   myMode, isMyMode, isOtherMode, activeMode, loading, pid, uptime, log,
-  onStart, onStop, children,
+  onStart, onStop, piDualMode, children,
 }: SdrModeBarProps) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 p-4">
@@ -65,14 +67,16 @@ export default function SdrModeBar({
               : 'bg-gray-600'
           }`} />
           <span className="text-sm text-gray-300">
-            {isMyMode ? 'Active' : isOtherMode
-              ? <>
-                  <a href={MODE_PAGES[activeMode!]} className="text-amber-400 hover:underline">
-                    {MODE_LABELS[activeMode!]}
-                  </a>
-                  {' '}is using the SDR — will auto-stop on start
-                </>
-              : 'SDR idle'}
+            {isMyMode
+              ? piDualMode ? 'Running on Pi slot 2' : 'Active'
+              : isOtherMode
+                ? <>
+                    <a href={MODE_PAGES[activeMode!]} className="text-amber-400 hover:underline">
+                      {MODE_LABELS[activeMode!]}
+                    </a>
+                    {' '}is using the SDR — will auto-stop on start
+                  </>
+                : piDualMode ? 'Pi slot 2 available' : 'SDR idle'}
           </span>
         </div>
 
