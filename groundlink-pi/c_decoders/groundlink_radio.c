@@ -466,11 +466,15 @@ int main(int argc, char **argv) {
     float squelch_gate = 0.0f; /* 0.0 = muted, 1.0 = open */
 
     /* FIR filter history buffers — tail of previous block for continuity */
-    float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* raw IQ */
+    float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* stage 1 IQ */
+    float hist_iq2_i[FIR_TAPS] = {0}, hist_iq2_q[FIR_TAPS] = {0}; /* stage 2 IQ (NFM) */
+    float hist_iq3_i[FIR_TAPS] = {0}, hist_iq3_q[FIR_TAPS] = {0}; /* stage 3 IQ (NFM) */
     float hist_audio[FIR_TAPS] = {0};                              /* audio */
 
     /* Decimation phase — carry remainder across blocks for uniform sample spacing */
     int iq_dec_phase = 0;
+    int iq_dec2_phase = 0;
+    int iq_dec3_phase = 0;
     int audio_dec_phase = 0;
 
     int frame_count = 0;
@@ -579,11 +583,22 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_iq2_i, hist_iq2_q,
+                                 &iq_dec2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_iq2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_iq3_i, hist_iq3_q,
+                                 &iq_dec3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_iq3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* FM demod on 48k IQ */
             for (int i = 0; i < n3; i++) {
@@ -593,6 +608,7 @@ int main(int argc, char **argv) {
                 prev_i = dec1_i[i];
                 prev_q = dec1_q[i];
             }
+            if (n3 > 1) audio[0] = audio[1]; /* fix block boundary */
 
             /* Decimate audio: 48k → /3 → 16k */
             n_audio = decimate_real(audio, n3,
@@ -633,11 +649,21 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_iq2_i, hist_iq2_q,
+                                 &iq_dec2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_iq2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_iq3_i, hist_iq3_q,
+                                 &iq_dec3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_iq3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* FM discriminator on 48k IQ — output stays at 48k */
             for (int i = 0; i < n3; i++) {
@@ -647,6 +673,7 @@ int main(int argc, char **argv) {
                 prev_i = dec1_i[i];
                 prev_q = dec1_q[i];
             }
+            if (n3 > 1) audio_dec[0] = audio_dec[1];
 
             n_audio = n3;
             audio_rate = 48000;
@@ -673,11 +700,21 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_iq2_i, hist_iq2_q,
+                                 &iq_dec2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_iq2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_iq3_i, hist_iq3_q,
+                                 &iq_dec3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_iq3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_iq3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* AM envelope detection with IIR DC removal (no block boundary clicks) */
             float dc_alpha = 1.0f - expf(-2.0f * PI_F * 20.0f / 48000.0f);
