@@ -13,6 +13,7 @@ services:
       - RADIO_WS_URL=ws://10.0.0.245:8770
       - SDR_AGENT_URL=http://host.docker.internal:8780
       - PI_AGENT_URL=http://10.0.0.245:8781
+      - NEXT_PUBLIC_PI_HOST=10.0.0.245
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

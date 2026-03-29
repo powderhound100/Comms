@@ -334,11 +334,18 @@ export default function RadioPage() {
     }
 
     // Connect WebSocket (binary audio + JSON spectrum)
-    // On localhost, connect directly to radio backend; on production, go through Cloudflare tunnel
+    // When adsb_dual is active, radio runs on Pi — connect to Pi IP directly
+    // Otherwise connect to localhost (Windows SDR) or Cloudflare tunnel
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    const wsUrl = isLocal
-      ? `ws://localhost:8770?freq=${freq}&mode=${mode}`
-      : `wss://radio.powderhound420.com?freq=${freq}&mode=${mode}`
+    const piHost = process.env.NEXT_PUBLIC_PI_HOST || '10.0.0.245'
+    let wsUrl: string
+    if (!isLocal) {
+      wsUrl = `wss://radio.powderhound420.com?freq=${freq}&mode=${mode}`
+    } else if (adsbDualActive) {
+      wsUrl = `ws://${piHost}:8770?freq=${freq}&mode=${mode}`
+    } else {
+      wsUrl = `ws://localhost:8770?freq=${freq}&mode=${mode}`
+    }
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -394,7 +401,7 @@ export default function RadioPage() {
         } catch { /* skip malformed JSON */ }
       }
     }
-  }, [playing, freq, mode, volume])
+  }, [playing, freq, mode, volume, adsbDualActive])
 
   // Update volume
   useEffect(() => {
