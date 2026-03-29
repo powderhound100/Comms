@@ -534,9 +534,11 @@ int main(int argc, char **argv) {
                     float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
                     float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
                     float d = fast_atan2f(cj, cr);
-                    /* Clamp sample-to-sample delta to prevent phase-jump pops */
+                    /* Clamp sample-to-sample delta to prevent phase-jump pops.
+                     * WFM: ±75 kHz deviation at 240k rate = ±0.98 rad/sample.
+                     * Allow 1.5 rad for headroom; USB phase jumps are >2.0 */
                     float delta = d - prev_demod;
-                    float max_delta = 0.5f;  /* ~max expected FM deviation per sample */
+                    float max_delta = 1.5f;
                     if (delta > max_delta) d = prev_demod + max_delta;
                     else if (delta < -max_delta) d = prev_demod - max_delta;
                     audio[i] = d;
