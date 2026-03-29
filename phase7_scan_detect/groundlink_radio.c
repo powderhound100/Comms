@@ -533,21 +533,62 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* Convert uint8 IQ → float [-1, 1] with ADC clipping detection */
+        /* ── Single-pass: convert + NCO mixer + IQ DC block + clipping ── */
         int n_iq = n_read / 2;
         int clip_count = 0;
+        float R_iq = 1.0f - (2.0f * PI_F * 5.0f / (float)rate);
+        int has_mixer = (g_dc_offset != 0);
+        float m_cos = 0.0f, m_sin = 0.0f;
+        if (has_mixer) {
+            m_cos = cosf(mixer_phase);
+            m_sin = sinf(mixer_phase);
+        }
+
         for (int i = 0; i < n_iq; i++) {
             uint8_t ri = raw_buf[2 * i];
             uint8_t rq = raw_buf[2 * i + 1];
             if (ri == 0 || ri == 255) clip_count++;
             if (rq == 0 || rq == 255) clip_count++;
-            iq_i[i] = (ri - 127.5f) / 128.0f;
-            iq_q[i] = (rq - 127.5f) / 128.0f;
+
+            float fi = (ri - 127.5f) / 128.0f;
+            float fq = (rq - 127.5f) / 128.0f;
+
+            /* NCO mixer: shift back from DC-offset tuning */
+            if (has_mixer) {
+                float ii = fi, qq = fq;
+                fi = ii * m_cos - qq * m_sin;
+                fq = ii * m_sin + qq * m_cos;
+                float nc = m_cos * rot_cos - m_sin * rot_sin;
+                float ns = m_cos * rot_sin + m_sin * rot_cos;
+                m_cos = nc;
+                m_sin = ns;
+                if ((i & 1023) == 1023) {
+                    float inv = 1.0f / sqrtf(m_cos * m_cos + m_sin * m_sin);
+                    m_cos *= inv;
+                    m_sin *= inv;
+                }
+            }
+
+            /* IQ DC block (inline): I channel */
+            float xi = fi;
+            iq_dcb_iy = xi - iq_dcb_ix + R_iq * iq_dcb_iy;
+            iq_dcb_ix = xi;
+
+            /* IQ DC block (inline): Q channel */
+            float xq = fq;
+            iq_dcb_qy = xq - iq_dcb_qx + R_iq * iq_dcb_qy;
+            iq_dcb_qx = xq;
+
+            iq_i[i] = iq_dcb_iy;
+            iq_q[i] = iq_dcb_qy;
+        }
+
+        if (has_mixer) {
+            mixer_phase = atan2f(m_sin, m_cos);
         }
 
         /* Hardware AGC: step gain down once if clipping detected */
         if (g_auto_gain && !gain_reduced && clip_count > n_iq / 50) {
-            /* >2% clipped — step down one notch */
             if (gain_idx > 0 && n_gains > 0) {
                 gain_idx--;
                 rtlsdr_set_tuner_gain(dev, gain_table[gain_idx]);
@@ -561,35 +602,6 @@ int main(int argc, char **argv) {
         } else if (!g_auto_gain && clip_count > n_iq / 50) {
             fprintf(stderr, "WARNING: ADC clipping: %d/%d samples (%.1f%%) — reduce gain\n",
                     clip_count, n_iq * 2, 100.0f * clip_count / (n_iq * 2));
-        }
-
-        /* NCO mixer: shift IQ back from DC-offset tuning */
-        if (g_dc_offset != 0) {
-            float m_cos = cosf(mixer_phase);
-            float m_sin = sinf(mixer_phase);
-            for (int i = 0; i < n_iq; i++) {
-                float ii = iq_i[i], qq = iq_q[i];
-                iq_i[i] = ii * m_cos - qq * m_sin;
-                iq_q[i] = ii * m_sin + qq * m_cos;
-                float nc = m_cos * rot_cos - m_sin * rot_sin;
-                float ns = m_cos * rot_sin + m_sin * rot_cos;
-                m_cos = nc;
-                m_sin = ns;
-                /* Renormalize every 1024 samples to prevent amplitude drift */
-                if ((i & 1023) == 1023) {
-                    float inv_mag = 1.0f / sqrtf(m_cos * m_cos + m_sin * m_sin);
-                    m_cos *= inv_mag;
-                    m_sin *= inv_mag;
-                }
-            }
-            mixer_phase = atan2f(m_sin, m_cos);
-        }
-
-        /* IQ DC block: remove residual DC from ADC/tuner imbalance */
-        {
-            float R_iq = 1.0f - (2.0f * PI_F * 5.0f / (float)rate);
-            dc_block(iq_i, n_iq, R_iq, &iq_dcb_ix, &iq_dcb_iy);
-            dc_block(iq_q, n_iq, R_iq, &iq_dcb_qx, &iq_dcb_qy);
         }
 
         /* ── Spectrum (every 3rd frame) ── */
