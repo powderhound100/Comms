@@ -11,11 +11,12 @@ export const radioChains: Record<string, SignalChain> = {
     blocks: [
       { label: 'Antenna', type: 'hardware' },
       { label: 'RTL-SDR', type: 'hardware' },
-      { label: 'FIR + Decimate ×10 IQ', type: 'dsp' },
+      { label: 'FIR 64-tap + Decimate ×10 IQ', type: 'dsp' },
       { label: 'Fast atan2 FM Demod', type: 'dsp' },
       { label: 'Decimate ×5 Audio', type: 'dsp' },
+      { label: 'DC Block ~23 Hz', type: 'dsp' },
       { label: 'De-emphasis 75μs', type: 'dsp' },
-      { label: 'Normalize → Int16', type: 'decode' },
+      { label: 'Smooth AGC → Int16', type: 'decode' },
       { label: 'Binary WebSocket', type: 'app' },
       { label: 'AudioWorklet', type: 'app' },
     ],
@@ -107,9 +108,9 @@ export const radioModes: RadioMode[] = [
     key: 'wfm',
     label: 'WFM',
     demod: 'Fast atan2 (C)',
-    filter: 'FIR LPF → ×10 IQ decim',
+    filter: '64-tap FIR LPF → ×10 IQ decim',
     outputRate: '48 kHz',
-    deEmphasis: '75 μs IIR (North America)',
+    deEmphasis: 'DC block + 75 μs IIR (North America)',
     typicalUse: 'FM broadcast radio',
   },
   {
@@ -175,7 +176,7 @@ export const dspConcepts: DSPConcept[] = [
   {
     term: 'FIR Low-Pass + Decimation',
     description:
-      'A 16-tap FIR filter (windowed sinc × Hamming) anti-aliases before downsampling. Each decimation stage filters to half the new Nyquist frequency, then keeps every Nth sample. Cascaded stages keep each factor small.',
+      'A 64-tap FIR filter (windowed sinc × Hamming) anti-aliases before downsampling. 64 taps provide ~32 dB+ stopband rejection — critical for the aggressive ×10 WFM decimation to prevent aliased energy folding into the audio band. Each stage filters to half the new Nyquist, then keeps every Nth sample.',
   },
   {
     term: 'De-emphasis IIR',
@@ -191,6 +192,16 @@ export const dspConcepts: DSPConcept[] = [
     term: 'Radix-2 FFT',
     description:
       'In-place Cooley-Tukey FFT on 1024 complex IQ samples. Hann-windowed, then bit-reversal + butterfly stages. Output bins averaged 4× to 256 points, converted to dBFS for spectrum display.',
+  },
+  {
+    term: 'DC Blocking Filter',
+    description:
+      'Single-pole high-pass IIR: y[n] = x[n] - x[n-1] + R·y[n-1], with R = 0.9985 (cutoff ~23 Hz at 48 kHz). Placed after the FM discriminator to remove DC wander — the discriminator outputs a DC offset that drifts between processing blocks, and each drift manifests as a low-frequency pop. Everything below ~23 Hz is inaudible, so removal is lossless.',
+  },
+  {
+    term: 'Per-Sample AGC Interpolation',
+    description:
+      'Instead of applying a single gain value to an entire audio block (which creates a step discontinuity at the boundary), the AGC linearly interpolates gain from the previous block\'s value to the current: g[i] = prev + (i/N)·(cur - prev). This eliminates the "click" artifact when AGC adjusts between blocks while preserving the same overall leveling behavior.',
   },
   {
     term: 'Jitter Buffer',
