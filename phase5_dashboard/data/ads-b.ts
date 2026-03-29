@@ -128,6 +128,172 @@ export const integrationScenarios: IntegrationScenario[] = [
   },
 ]
 
+// ── Decoder Pipeline (groundlink_adsb.c internals) ──
+
+export interface DecoderStage {
+  name: string
+  description: string
+  detail: string
+  type: 'hardware' | 'dsp' | 'decode' | 'app'
+}
+
+export const decoderPipeline: DecoderStage[] = [
+  {
+    name: 'Raw IQ Capture',
+    description: 'RTL-SDR samples 1090 MHz at 2.0 Msps, 8-bit unsigned I/Q',
+    detail: 'rtlsdr_read_async() with 256 KB buffers, automatic gain or manual via --gain flag',
+    type: 'hardware',
+  },
+  {
+    name: 'Magnitude LUT',
+    description: 'Precomputed 256×256 lookup table converts I/Q pairs to magnitude',
+    detail: 'maglut[256][256] = sqrt(I² + Q²) × 258, computed once at startup to avoid per-sample math',
+    type: 'dsp',
+  },
+  {
+    name: 'Preamble Detection',
+    description: 'Sliding window scans magnitude stream for ADS-B preamble pattern',
+    detail: '8 μs preamble: pulses at 0, 1, 3.5, 4.5 μs — validated by threshold ratio between high/low samples',
+    type: 'dsp',
+  },
+  {
+    name: 'PPM Bit Extraction',
+    description: 'Pulse Position Modulation decodes 112 bits from sample magnitudes',
+    detail: 'Each bit = 1 μs (2 samples at 2 Msps). Bit value determined by comparing first vs second half-period magnitude',
+    type: 'dsp',
+  },
+  {
+    name: 'CRC-24 Validation',
+    description: 'Verifies message integrity using ADS-B polynomial',
+    detail: 'Generator polynomial 0xFFF409 (x²⁴ + x²³ + x¹⁰ + x³ + 1). Remainder must be zero for valid messages',
+    type: 'decode',
+  },
+  {
+    name: 'Message Parsing',
+    description: 'Dispatches by Downlink Format — DF17 decoded by TypeCode',
+    detail: 'DF17 = Extended Squitter. TC 1–4: identification, TC 9–18: airborne position, TC 19: velocity, TC 5–8: surface',
+    type: 'decode',
+  },
+  {
+    name: 'CPR Position Decode',
+    description: 'Compact Position Reporting resolves lat/lon from even/odd frames',
+    detail: 'Globally unambiguous decode requires both even (F=0) and odd (F=1) frames within 10 s. 17-bit lat/lon encoding',
+    type: 'decode',
+  },
+  {
+    name: 'Aircraft State Table',
+    description: '256-slot hash table indexed by ICAO address, 60 s timeout',
+    detail: 'Each slot: ICAO, callsign, lat, lon, altitude, speed, heading, vertical rate, last-seen timestamp. Evicted after 60 s silence',
+    type: 'app',
+  },
+  {
+    name: 'Binary Frame Output',
+    description: 'Serializes aircraft state as fixed-width binary frames to stdout',
+    detail: 'Frame types: D (data, per-aircraft), S (stats summary), M (raw message hex). Piped to adsb_streamer.py via stdout',
+    type: 'app',
+  },
+]
+
+// ── SDR Slot Definitions ──
+
+export interface SdrSlotDef {
+  slot: number
+  serial: string
+  label: string
+  frequency: string
+  mode: string
+  streamer: string
+  destination: string
+  port: number
+  color: string
+}
+
+export const sdrSlots: SdrSlotDef[] = [
+  {
+    slot: 0,
+    serial: 'GROUNDLINK_1090',
+    label: '1090 MHz ADS-B',
+    frequency: '1090 MHz',
+    mode: 'adsb',
+    streamer: 'adsb_streamer.py',
+    destination: 'TCP → DualAdsbServer',
+    port: 9001,
+    color: 'cyan',
+  },
+  {
+    slot: 1,
+    serial: 'GROUNDLINK_978',
+    label: '978 MHz UAT',
+    frequency: '978 MHz',
+    mode: 'adsb',
+    streamer: 'uat_streamer.py',
+    destination: 'TCP → DualAdsbServer',
+    port: 9002,
+    color: 'orange',
+  },
+  {
+    slot: 2,
+    serial: 'GL_RADIO',
+    label: 'FM / Scanner',
+    frequency: 'Variable',
+    mode: 'radio',
+    streamer: 'radio_server.py',
+    destination: 'WebSocket direct',
+    port: 8770,
+    color: 'emerald',
+  },
+]
+
+// ── 3-Tier Data Flow ──
+
+export interface DataFlowTier {
+  tier: number
+  name: string
+  host: string
+  port: number
+  role: string
+  processes: { name: string; detail: string }[]
+}
+
+export const dataFlowTiers: DataFlowTier[] = [
+  {
+    tier: 1,
+    name: 'Pi SDR Node',
+    host: '10.0.0.245',
+    port: 8781,
+    role: 'RF capture, decode, stream',
+    processes: [
+      { name: 'pi_agent.py', detail: 'Manages SDR dongle lifecycle, slot allocation, health reporting' },
+      { name: 'groundlink_adsb', detail: 'C decoder — IQ → magnitude → preamble → CRC → aircraft state → binary frames' },
+      { name: 'adsb_streamer.py', detail: 'Reads binary frames from decoder stdout, forwards via TCP to Windows host' },
+    ],
+  },
+  {
+    tier: 2,
+    name: 'Windows Host',
+    host: 'localhost',
+    port: 8780,
+    role: 'Aggregation, merge, serve',
+    processes: [
+      { name: 'sdr_agent.py', detail: 'Orchestrates Pi connection, mode switching, gain control via WebSocket commands' },
+      { name: 'DualAdsbServer', detail: 'Merges 1090 MHz + 978 MHz feeds into unified aircraft list, serves WebSocket :8771' },
+      { name: 'adsb_server.py', detail: 'HTTP API for aircraft log, spectrum data, Pi health proxy' },
+    ],
+  },
+  {
+    tier: 3,
+    name: 'Dashboard',
+    host: 'localhost',
+    port: 3001,
+    role: 'Visualization, control UI',
+    processes: [
+      { name: 'Next.js App', detail: 'WebSocket client consuming :8771 for live aircraft + spectrum data' },
+      { name: '/api/pi/* proxy', detail: 'Server-side routes proxying Pi health, slot status, and control commands' },
+      { name: 'AircraftMap', detail: 'Leaflet map rendering aircraft positions, trails, and airport overlays' },
+    ],
+  },
+]
+
 // ── Signal Chain ──
 
 export const decodeChain: SignalChain = {

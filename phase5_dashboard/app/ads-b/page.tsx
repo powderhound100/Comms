@@ -15,8 +15,12 @@ import {
   software,
   integrationScenarios,
   decodeChain,
+  decoderPipeline,
+  sdrSlots,
+  dataFlowTiers,
 } from '@/data/ads-b'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
+import ArchitectureDiagram from '@/components/ArchitectureDiagram'
 import { useSdr } from '@/hooks/use-sdr'
 
 // ── Row helper ──
@@ -644,7 +648,7 @@ export default function ADSBPage() {
           <h2 className="text-lg font-semibold">ADS-B Reference</h2>
           <span className="text-gray-400 text-sm">{showReference ? 'Hide' : 'Show'}</span>
         </div>
-        <p className="text-xs text-gray-500 mt-1">RF parameters, message types, hardware, software stack</p>
+        <p className="text-xs text-gray-500 mt-1">RF parameters, message types, decoder architecture, multi-SDR slots, system data flow</p>
       </button>
 
       {showReference && (
@@ -747,6 +751,27 @@ export default function ADSBPage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* C Decoder Pipeline */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2 text-gray-400">C Decoder Pipeline</h3>
+            <p className="text-xs text-gray-500 mb-3">9-stage pipeline inside groundlink_adsb — click any stage to expand technical details</p>
+            <ArchitectureDiagram layout="pipeline" />
+          </div>
+
+          {/* Multi-SDR Slot Architecture */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2 text-gray-400">Multi-SDR Slot Architecture</h3>
+            <p className="text-xs text-gray-500 mb-3">Three RTL-SDR dongles managed by pi_agent.py — slots 0–1 merge into unified ADS-B feed</p>
+            <ArchitectureDiagram layout="slot-map" />
+          </div>
+
+          {/* System Data Flow */}
+          <div>
+            <h3 className="text-sm font-semibold mb-2 text-gray-400">System Data Flow</h3>
+            <p className="text-xs text-gray-500 mb-3">3-tier architecture from RF capture through aggregation to browser visualization</p>
+            <ArchitectureDiagram layout="tiered" />
           </div>
         </div>
       )}
