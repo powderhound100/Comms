@@ -55,6 +55,7 @@ class RadioProcess:
         self.freq_hz: int = int(94.9e6)
         self.mode: str = "wfm"
         self.gain: int = 400  # tenths of dB
+        self.auto_gain: bool = False
 
     async def start(self):
         """Spawn the C demodulator process (and DSD-FME for P25)."""
@@ -74,6 +75,8 @@ class RadioProcess:
         # Pass device serial if configured
         if DEVICE_SERIAL:
             cmd.extend(["--device-serial", DEVICE_SERIAL])
+        if self.auto_gain:
+            cmd.append("--auto-gain")
 
         logger.info("Starting: %s", " ".join(cmd))
 
@@ -253,6 +256,8 @@ async def radio_handler(websocket, radio: RadioProcess):
                         new_gain = data.get("gain", None)
                         if new_gain is not None:
                             radio.gain = int(new_gain)
+                        if "auto_gain" in data:
+                            radio.auto_gain = bool(data["auto_gain"])
                         logger.info("Tune command: %.3f MHz [%s] gain=%.1f dB",
                                     new_freq / 1e6, new_mode.upper(), radio.gain / 10.0)
                         # Cancel existing DSD reader if switching modes
@@ -348,6 +353,17 @@ async def radio_handler(websocket, radio: RadioProcess):
                         "psd_dbfs": list(bins),
                         "center_freq_hz": center_freq,
                         "bandwidth_hz": 2400000,
+                    }))
+
+                elif frame_type == b'G':
+                    # Gain frame: hardware AGC changed the gain
+                    payload = await proc.stdout.readexactly(payload_len)
+                    new_gain = struct.unpack('<i', payload[:4])[0]
+                    radio.gain = new_gain
+                    logger.info("Hardware AGC: gain now %.1f dB", new_gain / 10.0)
+                    await websocket.send(json.dumps({
+                        "type": "gain",
+                        "gain": new_gain,
                     }))
 
                 else:

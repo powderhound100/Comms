@@ -11,6 +11,7 @@
  * Output protocol (stdout, binary):
  *   Audio frame:    'A' (1B) + length (uint32 LE) + sample_rate (uint32 LE) + int16[] PCM
  *   Spectrum frame: 'S' (1B) + length (uint32 LE) + center_freq (uint32 LE) + float[] dBFS
+ *   Gain frame:     'G' (1B) + length (uint32 LE) + gain_tenths (int32 LE)
  */
 
 #ifdef _MSC_VER
@@ -68,6 +69,8 @@ static float fast_atan2f(float y, float x) {
         angle = 3.0f * PI_4;
     }
     angle += (0.1963f * r * r - 0.9817f) * r;
+    /* Clamp — polynomial can overshoot ±PI near y≈0, x<0 boundary */
+    if (angle > PI_F) angle = PI_F;
     return (y < 0.0f) ? -angle : angle;
 }
 
@@ -158,7 +161,7 @@ static void compute_spectrum(const float *iq_i, const float *iq_q,
     }
 }
 
-/* ── FIR low-pass filter coefficients (32-tap, normalized sinc) ── */
+/* ── FIR low-pass filter coefficients (64-tap, normalized sinc) ── */
 
 #define FIR_TAPS 64
 
@@ -194,6 +197,7 @@ static int decimate_iq(const float *in_i, const float *in_q, int n_in,
     int start = phase ? *phase : 0;
     int i = start;
     for (; i < n_in; i += factor) {
+        if (n_out >= CAPTURE_IQ) break;  /* buffer safety cap */
         float si = 0.0f, sq = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
@@ -229,6 +233,7 @@ static int decimate_real(const float *in, int n_in,
     int start = phase ? *phase : 0;
     int i = start;
     for (; i < n_in; i += factor) {
+        if (n_out >= CAPTURE_IQ) break;  /* buffer safety cap */
         float s = 0.0f;
         for (int t = 0; t < fir_len; t++) {
             int idx = i - t;
@@ -297,10 +302,22 @@ static void write_spectrum_frame(const float *bins, int n_bins,
     fflush(stdout);
 }
 
+static void write_gain_frame(int gain_tenths) {
+    uint8_t tag = 'G';
+    uint32_t payload_len = 4;
+    int32_t g = (int32_t)gain_tenths;
+    fwrite(&tag, 1, 1, stdout);
+    fwrite(&payload_len, 4, 1, stdout);
+    fwrite(&g, 4, 1, stdout);
+    fflush(stdout);
+}
+
 /* ── Parse command line ──────────────────────────────────────── */
 
 static char g_device_serial[64] = "";
 static int  g_device_index = 0;
+static int  g_dc_offset = 200000;   /* Hz — tune off-center to avoid DC spike */
+static int  g_auto_gain = 0;        /* toggleable hardware AGC */
 
 static int parse_args(int argc, char **argv,
                       uint32_t *freq, enum demod_mode *mode,
@@ -328,6 +345,10 @@ static int parse_args(int argc, char **argv,
             *gain = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--rate") == 0 && i + 1 < argc) {
             *rate = (uint32_t)atol(argv[++i]);
+        } else if (strcmp(argv[i], "--dc-offset") == 0 && i + 1 < argc) {
+            g_dc_offset = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--auto-gain") == 0) {
+            g_auto_gain = 1;
         } else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
             g_device_index = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--device-serial") == 0 && i + 1 < argc) {
@@ -340,6 +361,8 @@ static int parse_args(int argc, char **argv,
                 "  --mode MODE        wfm, nfm, am, disc (default: wfm)\n"
                 "  --gain TENTH       Gain in tenths of dB (default: 400 = 40.0 dB)\n"
                 "  --rate HZ          Sample rate (default: 2400000)\n"
+                "  --dc-offset HZ     DC offset tuning (default: 200000 = 200kHz)\n"
+                "  --auto-gain        Enable hardware AGC (reduce gain on clipping)\n"
                 "  --device N         RTL-SDR device index (default: 0)\n"
                 "  --device-serial SN RTL-SDR device serial (overrides --device)\n");
             return -1;
@@ -406,17 +429,31 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* DC offset tuning: tune SDR off-center to avoid DC spike */
+    uint32_t actual_freq = freq + (uint32_t)g_dc_offset;
     rtlsdr_set_sample_rate(dev, rate);
-    rtlsdr_set_center_freq(dev, freq);
+    rtlsdr_set_center_freq(dev, actual_freq);
     rtlsdr_set_tuner_gain_mode(dev, 1);   /* manual gain */
     rtlsdr_set_tuner_gain(dev, gain);
     rtlsdr_set_agc_mode(dev, 0);
     rtlsdr_reset_buffer(dev);
 
-    fprintf(stderr, "SDR configured: freq=%u Hz, rate=%u, gain=%.1f dB, mode=%s\n",
-            freq, rate, gain / 10.0f,
+    /* Build gain step table for hardware AGC */
+    int gain_table[64];
+    int n_gains = rtlsdr_get_tuner_gains(dev, NULL);
+    if (n_gains > 64) n_gains = 64;
+    if (n_gains > 0) rtlsdr_get_tuner_gains(dev, gain_table);
+    int gain_idx = 0;
+    for (int i = 0; i < n_gains; i++) {
+        if (gain_table[i] == gain) { gain_idx = i; break; }
+    }
+    int gain_reduced = 0;  /* flag: AGC has already stepped down */
+
+    fprintf(stderr, "SDR configured: freq=%u Hz (tuned %+dHz → %u), rate=%u, gain=%.1f dB, mode=%s%s\n",
+            freq, g_dc_offset, actual_freq, rate, gain / 10.0f,
             mode == MODE_WFM ? "WFM" : mode == MODE_NFM ? "NFM" :
-            mode == MODE_AM ? "AM" : "DISC");
+            mode == MODE_AM ? "AM" : "DISC",
+            g_auto_gain ? ", auto-gain ON" : "");
 
     /* ── Allocate buffers ── */
     uint8_t *raw_buf = (uint8_t *)malloc(CAPTURE_BYTES);
@@ -454,16 +491,31 @@ int main(int argc, char **argv) {
     float am_dc = 0.0f;        /* IIR DC estimator */
     float agc_peak = (mode == MODE_WFM) ? 0.5f : 0.01f;  /* WFM: mid-range avoids initial transient; AM/NFM: low start for weak signals */
 
-    /* DC block state */
+    /* Audio DC block state (post-demod) */
     float dcb_x_prev = 0.0f, dcb_y_prev = 0.0f;
+
+    /* IQ DC block state (pre-demod, separate I/Q channels) */
+    float iq_dcb_ix = 0.0f, iq_dcb_iy = 0.0f;
+    float iq_dcb_qx = 0.0f, iq_dcb_qy = 0.0f;
+
+    /* NCO mixer state for DC offset tuning */
+    float mixer_phase = 0.0f;
+    float phase_inc = -2.0f * PI_F * (float)g_dc_offset / (float)rate;
+    float rot_cos = cosf(phase_inc);
+    float rot_sin = sinf(phase_inc);
 
     /* Squelch state (AM/NFM) */
     float noise_floor = 0.05f; /* IIR noise floor estimator */
     float squelch_gate = 0.0f; /* 0.0 = muted, 1.0 = open */
 
     /* FIR filter history buffers — tail of previous block for continuity */
-    float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* raw IQ */
+    float hist_iq_i[FIR_TAPS] = {0}, hist_iq_q[FIR_TAPS] = {0};  /* stage 1 (raw IQ) */
     float hist_audio[FIR_TAPS] = {0};                              /* audio */
+
+    /* Intermediate decimation history (NFM/AM/DISC stages 2 & 3) */
+    float hist_stg2_i[FIR_TAPS] = {0}, hist_stg2_q[FIR_TAPS] = {0};
+    float hist_stg3_i[FIR_TAPS] = {0}, hist_stg3_q[FIR_TAPS] = {0};
+    int stg2_phase = 0, stg3_phase = 0;
 
     /* Decimation phase — carry remainder across blocks for uniform sample spacing */
     int iq_dec_phase = 0;
@@ -481,11 +533,63 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* Convert uint8 IQ → float [-1, 1] */
+        /* Convert uint8 IQ → float [-1, 1] with ADC clipping detection */
         int n_iq = n_read / 2;
+        int clip_count = 0;
         for (int i = 0; i < n_iq; i++) {
-            iq_i[i] = (raw_buf[2 * i]     - 127.5f) / 128.0f;
-            iq_q[i] = (raw_buf[2 * i + 1] - 127.5f) / 128.0f;
+            uint8_t ri = raw_buf[2 * i];
+            uint8_t rq = raw_buf[2 * i + 1];
+            if (ri == 0 || ri == 255) clip_count++;
+            if (rq == 0 || rq == 255) clip_count++;
+            iq_i[i] = (ri - 127.5f) / 128.0f;
+            iq_q[i] = (rq - 127.5f) / 128.0f;
+        }
+
+        /* Hardware AGC: step gain down once if clipping detected */
+        if (g_auto_gain && !gain_reduced && clip_count > n_iq / 50) {
+            /* >2% clipped — step down one notch */
+            if (gain_idx > 0 && n_gains > 0) {
+                gain_idx--;
+                rtlsdr_set_tuner_gain(dev, gain_table[gain_idx]);
+                fprintf(stderr, "AGC: clipping %d/%d (%.1f%%) — gain → %.1f dB\n",
+                        clip_count, n_iq * 2,
+                        100.0f * clip_count / (n_iq * 2),
+                        gain_table[gain_idx] / 10.0f);
+                write_gain_frame(gain_table[gain_idx]);
+                gain_reduced = 1;
+            }
+        } else if (!g_auto_gain && clip_count > n_iq / 50) {
+            fprintf(stderr, "WARNING: ADC clipping: %d/%d samples (%.1f%%) — reduce gain\n",
+                    clip_count, n_iq * 2, 100.0f * clip_count / (n_iq * 2));
+        }
+
+        /* NCO mixer: shift IQ back from DC-offset tuning */
+        if (g_dc_offset != 0) {
+            float m_cos = cosf(mixer_phase);
+            float m_sin = sinf(mixer_phase);
+            for (int i = 0; i < n_iq; i++) {
+                float ii = iq_i[i], qq = iq_q[i];
+                iq_i[i] = ii * m_cos - qq * m_sin;
+                iq_q[i] = ii * m_sin + qq * m_cos;
+                float nc = m_cos * rot_cos - m_sin * rot_sin;
+                float ns = m_cos * rot_sin + m_sin * rot_cos;
+                m_cos = nc;
+                m_sin = ns;
+                /* Renormalize every 1024 samples to prevent amplitude drift */
+                if ((i & 1023) == 1023) {
+                    float inv_mag = 1.0f / sqrtf(m_cos * m_cos + m_sin * m_sin);
+                    m_cos *= inv_mag;
+                    m_sin *= inv_mag;
+                }
+            }
+            mixer_phase = atan2f(m_sin, m_cos);
+        }
+
+        /* IQ DC block: remove residual DC from ADC/tuner imbalance */
+        {
+            float R_iq = 1.0f - (2.0f * PI_F * 5.0f / (float)rate);
+            dc_block(iq_i, n_iq, R_iq, &iq_dcb_ix, &iq_dcb_iy);
+            dc_block(iq_q, n_iq, R_iq, &iq_dcb_qx, &iq_dcb_qy);
         }
 
         /* ── Spectrum (every 3rd frame) ── */
@@ -561,11 +665,22 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_stg2_i, hist_stg2_q,
+                                 &stg2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_stg2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_stg3_i, hist_stg3_q,
+                                 &stg3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_stg3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* FM demod on 48k IQ */
             for (int i = 0; i < n3; i++) {
@@ -612,11 +727,22 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_stg2_i, hist_stg2_q,
+                                 &stg2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_stg2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_stg3_i, hist_stg3_q,
+                                 &stg3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_stg3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* FM discriminator on 48k IQ — output stays at 48k */
             for (int i = 0; i < n3; i++) {
@@ -649,11 +775,22 @@ int main(int argc, char **argv) {
             int n2 = decimate_iq(dec1_i, dec1_q, n1,
                                  dec2_i, dec2_q,
                                  fir_5, FIR_TAPS, 5,
-                                 NULL, NULL, NULL);
+                                 hist_stg2_i, hist_stg2_q,
+                                 &stg2_phase);
+            if (n1 >= FIR_TAPS) {
+                memcpy(hist_stg2_i, dec1_i + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg2_q, dec1_q + n1 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
+
             int n3 = decimate_iq(dec2_i, dec2_q, n2,
                                  dec1_i, dec1_q,
                                  fir_2, FIR_TAPS, 2,
-                                 NULL, NULL, NULL);
+                                 hist_stg3_i, hist_stg3_q,
+                                 &stg3_phase);
+            if (n2 >= FIR_TAPS) {
+                memcpy(hist_stg3_i, dec2_i + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+                memcpy(hist_stg3_q, dec2_q + n2 - FIR_TAPS, FIR_TAPS * sizeof(float));
+            }
 
             /* AM envelope detection with IIR DC removal (no block boundary clicks) */
             float dc_alpha = 1.0f - expf(-2.0f * PI_F * 20.0f / 48000.0f);
