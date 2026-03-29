@@ -587,6 +587,18 @@ static void parse_uat_short_message(const uint8_t *msg, int msg_len) {
  * bits after a matched sync, assembles bytes, and CRC-validates.
  */
 
+/* Debug counters (reset each block) */
+static int g_dbg_energy_skip = 0;
+static int g_dbg_sync_checks = 0;
+static int g_dbg_long_match = 0;
+static int g_dbg_short_match = 0;
+static int g_dbg_long_crc_ok = 0;
+static int g_dbg_short_crc_ok = 0;
+static int g_dbg_long_crc_fail = 0;
+static int g_dbg_short_crc_fail = 0;
+static int g_dbg_best_long_corr = 0;
+static int g_dbg_best_short_corr = 0;
+
 static int detect_and_decode_uat(const float *fm_out, int n_fm,
                                   const uint8_t *raw_iq) {
     int decoded = 0;
@@ -602,6 +614,17 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
 
     (void)raw_iq;
 
+    g_dbg_energy_skip = 0;
+    g_dbg_sync_checks = 0;
+    g_dbg_long_match = 0;
+    g_dbg_short_match = 0;
+    g_dbg_long_crc_ok = 0;
+    g_dbg_short_crc_ok = 0;
+    g_dbg_long_crc_fail = 0;
+    g_dbg_short_crc_fail = 0;
+    g_dbg_best_long_corr = 0;
+    g_dbg_best_short_corr = 0;
+
     while (pos < n_fm - min_remaining_short) {
         /* Quick pre-screen: check if the FM signal has sufficient energy
          * at this position by looking at the magnitude of the first few
@@ -613,12 +636,16 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
         if (energy < 0.5f) {
             /* Very low energy — skip forward */
             pos += 4;
+            g_dbg_energy_skip++;
             continue;
         }
 
         /* Try long sync first (more common for aircraft position) */
+        g_dbg_sync_checks++;
         int long_match = correlate_sync(fm_out, n_fm, pos, SYNC_LONG);
+        if (long_match > g_dbg_best_long_corr) g_dbg_best_long_corr = long_match;
         if (long_match >= SYNC_THRESHOLD && pos + min_remaining_long <= n_fm) {
+            g_dbg_long_match++;
             /* Extract message bits after sync */
             int data_start = pos + sync_samples;
             uint8_t bits[LONG_MSG_BITS];
@@ -630,6 +657,7 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
 
                 /* CRC validation */
                 if (check_uat_crc(msg_bytes, LONG_MSG_BYTES)) {
+                    g_dbg_long_crc_ok++;
                     parse_uat_long_message(msg_bytes, LONG_MSG_BYTES);
                     decoded++;
 
@@ -650,13 +678,17 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
                     /* Skip past this message */
                     pos += min_remaining_long;
                     continue;
+                } else {
+                    g_dbg_long_crc_fail++;
                 }
             }
         }
 
         /* Try short sync */
         int short_match = correlate_sync(fm_out, n_fm, pos, SYNC_SHORT);
+        if (short_match > g_dbg_best_short_corr) g_dbg_best_short_corr = short_match;
         if (short_match >= SYNC_THRESHOLD) {
+            g_dbg_short_match++;
             int data_start = pos + sync_samples;
             uint8_t bits[SHORT_MSG_BITS];
             int got = slice_bits(fm_out, n_fm, data_start, bits, SHORT_MSG_BITS);
@@ -666,6 +698,7 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
                 bits_to_bytes(bits, msg_bytes, SHORT_MSG_BITS);
 
                 if (check_uat_crc(msg_bytes, SHORT_MSG_BYTES)) {
+                    g_dbg_short_crc_ok++;
                     parse_uat_short_message(msg_bytes, SHORT_MSG_BYTES);
                     decoded++;
 
@@ -1150,6 +1183,16 @@ int main(int argc, char **argv) {
         age_aircraft(now);
 
         frame_count++;
+
+        /* Debug output every 8 blocks (~1 second) */
+        if (frame_count % 8 == 0) {
+            fprintf(stderr, "[UAT dbg] blk=%d chk=%d skip=%d | long: best=%d/%d match=%d crc_ok=%d fail=%d | short: best=%d/%d match=%d crc_ok=%d\n",
+                    frame_count, g_dbg_sync_checks, g_dbg_energy_skip,
+                    g_dbg_best_long_corr, SYNC_THRESHOLD, g_dbg_long_match,
+                    g_dbg_long_crc_ok, g_dbg_long_crc_fail,
+                    g_dbg_best_short_corr, SYNC_THRESHOLD, g_dbg_short_match,
+                    g_dbg_short_crc_ok);
+        }
 
         /* Emit spectrum (every SPECTRUM_INTERVAL blocks) */
         if (frame_count % SPECTRUM_INTERVAL == 0) {
