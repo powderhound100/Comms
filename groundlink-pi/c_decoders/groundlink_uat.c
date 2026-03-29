@@ -47,11 +47,21 @@
 #define CAPTURE_IQ          (CAPTURE_BYTES / 2)
 
 #define SYNC_BITS           36              /* 36-bit sync words */
-#define SHORT_MSG_BITS      144             /* 18 data bytes */
-#define LONG_MSG_BITS       272             /* 34 data bytes */
-#define SHORT_MSG_BYTES     18
-#define LONG_MSG_BYTES      34
-#define SYNC_THRESHOLD      32              /* min matching bits out of 36 */
+/*
+ * UAT message sizes (data + FEC):
+ *   Short: 18 data bytes + 12 RS parity = 30 bytes = 240 bits
+ *   Long:  34 data bytes + 14 RS parity = 48 bytes = 384 bits
+ * We extract the full message but only parse the data portion.
+ */
+#define SHORT_DATA_BITS     144             /* 18 data bytes */
+#define LONG_DATA_BITS      272             /* 34 data bytes */
+#define SHORT_MSG_BITS      240             /* 30 bytes total (with FEC) */
+#define LONG_MSG_BITS       384             /* 48 bytes total (with FEC) */
+#define SHORT_MSG_BYTES     30
+#define LONG_MSG_BYTES      48
+#define SHORT_DATA_BYTES    18
+#define LONG_DATA_BYTES     34
+#define SYNC_THRESHOLD      30              /* min matching bits out of 36 (was 32) */
 
 #define SAMPLES_PER_BIT     2               /* 2 IQ samples per UAT bit */
 
@@ -655,16 +665,20 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
                 uint8_t msg_bytes[LONG_MSG_BYTES];
                 bits_to_bytes(bits, msg_bytes, LONG_MSG_BITS);
 
-                /* CRC validation */
-                if (check_uat_crc(msg_bytes, LONG_MSG_BYTES)) {
-                    g_dbg_long_crc_ok++;
-                    parse_uat_long_message(msg_bytes, LONG_MSG_BYTES);
+                /* CRC on data portion only (first LONG_DATA_BYTES) */
+                int crc_ok = check_uat_crc(msg_bytes, LONG_DATA_BYTES);
+                if (crc_ok) g_dbg_long_crc_ok++;
+                else g_dbg_long_crc_fail++;
+
+                /* Parse if CRC passes, or if sync correlation was very strong (>=34) */
+                if (crc_ok || long_match >= 34) {
+                    parse_uat_long_message(msg_bytes, LONG_DATA_BYTES);
                     decoded++;
 
                     /* Write raw hex 'M' frame */
-                    int hex_len = LONG_MSG_BYTES * 2;
-                    char hex[LONG_MSG_BYTES * 2 + 1];
-                    for (int b = 0; b < LONG_MSG_BYTES; b++)
+                    int hex_len = LONG_DATA_BYTES * 2;
+                    char hex[LONG_DATA_BYTES * 2 + 1];
+                    for (int b = 0; b < LONG_DATA_BYTES; b++)
                         sprintf(hex + b * 2, "%02X", msg_bytes[b]);
                     hex[hex_len] = '\0';
 
@@ -674,13 +688,11 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
                     fwrite(&len, 4, 1, stdout);
                     fwrite(hex, 1, hex_len, stdout);
                     fflush(stdout);
-
-                    /* Skip past this message */
-                    pos += min_remaining_long;
-                    continue;
-                } else {
-                    g_dbg_long_crc_fail++;
                 }
+
+                /* Skip past this message */
+                pos += min_remaining_long;
+                continue;
             }
         }
 
@@ -697,15 +709,18 @@ static int detect_and_decode_uat(const float *fm_out, int n_fm,
                 uint8_t msg_bytes[SHORT_MSG_BYTES];
                 bits_to_bytes(bits, msg_bytes, SHORT_MSG_BITS);
 
-                if (check_uat_crc(msg_bytes, SHORT_MSG_BYTES)) {
-                    g_dbg_short_crc_ok++;
-                    parse_uat_short_message(msg_bytes, SHORT_MSG_BYTES);
+                /* CRC on data portion only */
+                int crc_ok = check_uat_crc(msg_bytes, SHORT_DATA_BYTES);
+                if (crc_ok) g_dbg_short_crc_ok++;
+
+                /* Parse if CRC passes, or if sync was very strong */
+                if (crc_ok || short_match >= 34) {
+                    parse_uat_short_message(msg_bytes, SHORT_DATA_BYTES);
                     decoded++;
 
-                    /* Write raw hex 'M' frame */
-                    int hex_len = SHORT_MSG_BYTES * 2;
-                    char hex[SHORT_MSG_BYTES * 2 + 1];
-                    for (int b = 0; b < SHORT_MSG_BYTES; b++)
+                    int hex_len = SHORT_DATA_BYTES * 2;
+                    char hex[SHORT_DATA_BYTES * 2 + 1];
+                    for (int b = 0; b < SHORT_DATA_BYTES; b++)
                         sprintf(hex + b * 2, "%02X", msg_bytes[b]);
                     hex[hex_len] = '\0';
 
