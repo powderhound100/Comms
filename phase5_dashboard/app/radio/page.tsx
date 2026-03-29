@@ -571,6 +571,40 @@ export default function RadioPage() {
             </div>
           </div>
 
+          {/* SDR Gain (Slot 2) */}
+          <div className="min-w-[120px]">
+            <label className="block text-[10px] uppercase tracking-wider text-gray-600 mb-1">
+              SDR Gain <span className="radio-gain-label text-fuchsia-400">40.0 dB</span>
+            </label>
+            <input
+              type="range"
+              min="0" max="496" step="10"
+              defaultValue={400}
+              className="w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer accent-fuchsia-500"
+              onInput={(e) => {
+                const val = parseInt((e.target as HTMLInputElement).value)
+                const label = document.querySelector('.radio-gain-label')
+                if (label) label.textContent = `${(val / 10).toFixed(1)} dB`
+              }}
+              onMouseUp={(e) => {
+                const newGain = parseInt((e.target as HTMLInputElement).value)
+                fetch('/api/pi/sdr/2/start', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'radio', config: { gain: newGain, freq: freq / 1e6, radio_mode: mode } }),
+                })
+              }}
+              onTouchEnd={(e) => {
+                const newGain = parseInt((e.target as HTMLInputElement).value)
+                fetch('/api/pi/sdr/2/start', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'radio', config: { gain: newGain, freq: freq / 1e6, radio_mode: mode } }),
+                })
+              }}
+            />
+          </div>
+
           {/* Volume */}
           <div className="flex-1 min-w-[140px]">
             <label className="block text-[10px] uppercase tracking-wider text-gray-600 mb-1">

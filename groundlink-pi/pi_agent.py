@@ -151,6 +151,7 @@ class SlotManager:
                 "--port", str(port),
                 "--freq", str(freq),
                 "--mode", radio_mode,
+                "--gain", str(gain),
                 "--device-serial", serial,
             ]
         elif mode == "scanner":

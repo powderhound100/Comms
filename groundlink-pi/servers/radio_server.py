@@ -383,7 +383,8 @@ async def radio_handler(websocket, radio: RadioProcess):
 @click.option("--mode", default="wfm", type=click.Choice(["wfm", "nfm", "am", "p25"]),
               help="Demod mode")
 @click.option("--device-serial", default=None, help="RTL-SDR device serial (for multi-dongle)")
-def main(port, freq, mode, device_serial):
+@click.option("--gain", default=400, help="Gain in tenths of dB (default: 400 = 40.0 dB)")
+def main(port, freq, mode, device_serial, gain):
     """GROUNDLINK Radio — Live SDR audio receiver (C backend, Pi)."""
     import websockets
 
@@ -393,6 +394,7 @@ def main(port, freq, mode, device_serial):
     radio = RadioProcess()
     radio.freq_hz = int(freq * 1e6)
     radio.mode = mode
+    radio.gain = gain
 
     # Verify the C executable exists
     if not os.path.isfile(RADIO_EXE):
