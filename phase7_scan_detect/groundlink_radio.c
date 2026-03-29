@@ -23,7 +23,11 @@
 #include <math.h>
 #include <stdint.h>
 #include <fcntl.h>
+#ifdef _WIN32
 #include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include <signal.h>
 
 #include "rtlsdr.h"
@@ -280,6 +284,9 @@ static void write_spectrum_frame(const float *bins, int n_bins,
 
 /* ── Parse command line ──────────────────────────────────────── */
 
+static char g_device_serial[64] = "";
+static int  g_device_index = 0;
+
 static int parse_args(int argc, char **argv,
                       uint32_t *freq, enum demod_mode *mode,
                       int *gain, uint32_t *rate) {
@@ -287,6 +294,7 @@ static int parse_args(int argc, char **argv,
     *mode = MODE_WFM;
     *gain = 400;       /* 40.0 dB */
     *rate = SAMPLE_RATE;
+    g_device_serial[0] = '\0';
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--freq") == 0 && i + 1 < argc) {
@@ -305,14 +313,20 @@ static int parse_args(int argc, char **argv,
             *gain = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--rate") == 0 && i + 1 < argc) {
             *rate = (uint32_t)atol(argv[++i]);
+        } else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
+            g_device_index = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--device-serial") == 0 && i + 1 < argc) {
+            strncpy(g_device_serial, argv[++i], sizeof(g_device_serial) - 1);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fprintf(stderr,
                 "groundlink_radio — C SDR demodulator + spectrum tool\n\n"
                 "Usage: groundlink_radio [options]\n"
-                "  --freq HZ     Center frequency (default: 94900000)\n"
-                "  --mode MODE   wfm, nfm, am, disc (default: wfm)\n"
-                "  --gain TENTH  Gain in tenths of dB (default: 400 = 40.0 dB)\n"
-                "  --rate HZ     Sample rate (default: 2400000)\n");
+                "  --freq HZ          Center frequency (default: 94900000)\n"
+                "  --mode MODE        wfm, nfm, am, disc (default: wfm)\n"
+                "  --gain TENTH       Gain in tenths of dB (default: 400 = 40.0 dB)\n"
+                "  --rate HZ          Sample rate (default: 2400000)\n"
+                "  --device N         RTL-SDR device index (default: 0)\n"
+                "  --device-serial SN RTL-SDR device serial (overrides --device)\n");
             return -1;
         }
     }
@@ -330,7 +344,9 @@ int main(int argc, char **argv) {
         return 1;
 
     /* Set stdout to binary mode (Windows) */
+#ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
+#endif
 
     signal(SIGINT, sighandler);
     signal(SIGTERM, sighandler);
@@ -358,8 +374,20 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "Found %u RTL-SDR device(s)\n", dev_count);
 
-    if (rtlsdr_open(&dev, 0) != 0) {
-        fprintf(stderr, "ERROR: Failed to open RTL-SDR device 0\n");
+    /* Resolve device serial to index */
+    int dev_idx = g_device_index;
+    if (g_device_serial[0] != '\0') {
+        int idx = rtlsdr_get_index_by_serial(g_device_serial);
+        if (idx < 0) {
+            fprintf(stderr, "ERROR: Device serial '%s' not found\n", g_device_serial);
+            return 1;
+        }
+        dev_idx = idx;
+        fprintf(stderr, "Found device serial '%s' at index %d\n", g_device_serial, dev_idx);
+    }
+
+    if (rtlsdr_open(&dev, (uint32_t)dev_idx) != 0) {
+        fprintf(stderr, "ERROR: Failed to open RTL-SDR device %d\n", dev_idx);
         return 1;
     }
 
