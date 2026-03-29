@@ -30,6 +30,9 @@
 #include <unistd.h>
 #endif
 #include <signal.h>
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 #include "rtlsdr.h"
 
@@ -522,9 +525,15 @@ int main(int argc, char **argv) {
     int audio_dec_phase = 0;
 
     int frame_count = 0;
+    int slow_block_count = 0;
+    float expected_block_ms = (float)CAPTURE_IQ / (float)rate * 1000.0f;
 
     /* ── Main loop ── */
     while (g_running) {
+#ifndef _WIN32
+        struct timespec t_start, t_end;
+        clock_gettime(CLOCK_MONOTONIC, &t_start);
+#endif
         int n_read = 0;
         int r = rtlsdr_read_sync(dev, raw_buf, CAPTURE_BYTES, &n_read);
         if (r != 0 || n_read != CAPTURE_BYTES) {
@@ -635,7 +644,7 @@ int main(int argc, char **argv) {
             for (int i = 0; i < n_dec; i++) {
                 float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
                 float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
-                audio[i] = fast_atan2f(cj, cr);
+                audio[i] = atan2f(cj, cr);
                 prev_i = dec1_i[i];
                 prev_q = dec1_q[i];
             }
@@ -698,7 +707,7 @@ int main(int argc, char **argv) {
             for (int i = 0; i < n3; i++) {
                 float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
                 float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
-                audio[i] = fast_atan2f(cj, cr);
+                audio[i] = atan2f(cj, cr);
                 prev_i = dec1_i[i];
                 prev_q = dec1_q[i];
             }
@@ -760,7 +769,7 @@ int main(int argc, char **argv) {
             for (int i = 0; i < n3; i++) {
                 float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
                 float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
-                audio_dec[i] = fast_atan2f(cj, cr);
+                audio_dec[i] = atan2f(cj, cr);
                 prev_i = dec1_i[i];
                 prev_q = dec1_q[i];
             }
@@ -834,7 +843,7 @@ int main(int argc, char **argv) {
         /* ── Normalize + convert to int16 PCM ── */
         if (mode == MODE_DISC) {
             /* DISC: fixed-gain scaling, no AGC/squelch.
-             * fast_atan2f output is [-PI, PI], scale to ~80% of int16 range. */
+             * atan2f output is [-PI, PI], scale to ~80% of int16 range. */
             float disc_scale = 0.8f * 32767.0f / PI_F;
             for (int i = 0; i < n_audio; i++) {
                 float s = audio_dec[i] * disc_scale;
@@ -899,6 +908,21 @@ int main(int argc, char **argv) {
         if (n_audio > 0) {
             write_audio_frame(pcm, n_audio, audio_rate);
         }
+
+#ifndef _WIN32
+        clock_gettime(CLOCK_MONOTONIC, &t_end);
+        float block_ms = (t_end.tv_sec - t_start.tv_sec) * 1000.0f +
+                         (t_end.tv_nsec - t_start.tv_nsec) / 1e6f;
+        /* Warn if total block time (read + process) is significantly shorter
+           than expected — means samples were already queued (backup) */
+        if (block_ms < expected_block_ms * 0.5f) {
+            slow_block_count++;
+            if (slow_block_count <= 5 || slow_block_count % 100 == 0) {
+                fprintf(stderr, "WARNING: block took %.1fms (expected ~%.0fms) — sample backup #%d\n",
+                        block_ms, expected_block_ms, slow_block_count);
+            }
+        }
+#endif
     }
 
     /* ── Cleanup ── */
