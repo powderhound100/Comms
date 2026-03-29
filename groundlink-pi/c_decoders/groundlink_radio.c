@@ -489,19 +489,11 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* Convert uint8 IQ → float [-1, 1] with IQ DC removal */
+        /* Convert uint8 IQ → float [-1, 1] */
         int n_iq = n_read / 2;
-        {
-            static float dc_i = 0.0f, dc_q = 0.0f;
-            float alpha_dc = 0.0001f;  /* very slow DC tracker */
-            for (int i = 0; i < n_iq; i++) {
-                float ri = (raw_buf[2 * i]     - 127.5f) / 128.0f;
-                float rq = (raw_buf[2 * i + 1] - 127.5f) / 128.0f;
-                dc_i += alpha_dc * (ri - dc_i);
-                dc_q += alpha_dc * (rq - dc_q);
-                iq_i[i] = ri - dc_i;
-                iq_q[i] = rq - dc_q;
-            }
+        for (int i = 0; i < n_iq; i++) {
+            iq_i[i] = (raw_buf[2 * i]     - 127.5f) / 128.0f;
+            iq_q[i] = (raw_buf[2 * i + 1] - 127.5f) / 128.0f;
         }
 
         /* ── Spectrum (every 3rd frame) ── */
