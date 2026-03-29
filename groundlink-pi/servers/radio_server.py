@@ -250,8 +250,11 @@ async def radio_handler(websocket, radio: RadioProcess):
                     if data.get("type") == "tune":
                         new_freq = int(data.get("freq_hz", radio.freq_hz))
                         new_mode = data.get("mode", radio.mode)
-                        logger.info("Tune command: %.3f MHz [%s]",
-                                    new_freq / 1e6, new_mode.upper())
+                        new_gain = data.get("gain", None)
+                        if new_gain is not None:
+                            radio.gain = int(new_gain)
+                        logger.info("Tune command: %.3f MHz [%s] gain=%.1f dB",
+                                    new_freq / 1e6, new_mode.upper(), radio.gain / 10.0)
                         # Cancel existing DSD reader if switching modes
                         if dsd_task and not dsd_task.done():
                             dsd_task.cancel()

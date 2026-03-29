@@ -588,19 +588,16 @@ export default function RadioPage() {
               }}
               onMouseUp={(e) => {
                 const newGain = parseInt((e.target as HTMLInputElement).value)
-                fetch('/api/pi/sdr/2/start', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: 'radio', config: { gain: newGain, freq: freq / 1e6, radio_mode: mode } }),
-                })
+                // Send gain change as a tune command over WebSocket (avoids slot restart)
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
+                }
               }}
               onTouchEnd={(e) => {
                 const newGain = parseInt((e.target as HTMLInputElement).value)
-                fetch('/api/pi/sdr/2/start', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: 'radio', config: { gain: newGain, freq: freq / 1e6, radio_mode: mode } }),
-                })
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
+                }
               }}
             />
           </div>
