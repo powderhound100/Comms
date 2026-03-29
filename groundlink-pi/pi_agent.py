@@ -376,7 +376,9 @@ class PiAgentApp:
             return web.json_response({"error": "No mode specified"}, status=400)
 
         try:
-            await self.slots[slot_id].start(mode, body)
+            # Config may be nested under "config" key or flat in body
+            cfg = body.get("config", body)
+            await self.slots[slot_id].start(mode, cfg)
             return web.json_response({
                 "ok": True,
                 "slot": slot_id,
