@@ -17,7 +17,6 @@ import {
   decodeChain,
 } from '@/data/ads-b'
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
-import SdrModeBar from '@/components/SdrModeBar'
 import { useSdr } from '@/hooks/use-sdr'
 
 // ── Row helper ──
@@ -63,10 +62,8 @@ export default function ADSBPage() {
   const [showLog, setShowLog] = useState(false)
   const [selectedTrackIcao, setSelectedTrackIcao] = useState<string | null>(null)
 
-  // SDR mode control
-  const { status: sdrStatus, loading: sdrLoading, isMyMode, isOtherMode, start: sdrStart, stop: sdrStop } = useSdr('adsb')
-  const [testMode, setTestMode] = useState(false)
-  const [gain, setGain] = useState(496)
+  // SDR mode control (for WebSocket connection detection)
+  const { status: sdrStatus, isMyMode } = useSdr('adsb')
 
   // Dual-frequency state — refs for high-frequency updates, direct DOM
   const [psdData978, setPsdData978] = useState<number[] | null>(null)
@@ -112,24 +109,6 @@ export default function ADSBPage() {
     const timer = setInterval(fetchPiHealth, 5000)
     return () => clearInterval(timer)
   }, [])
-
-  const handleStart = useCallback(async () => {
-    await sdrStart({ gain, test: testMode })
-  }, [sdrStart, gain, testMode])
-
-  const handleStop = useCallback(async () => {
-    await sdrStop()
-    setAircraft([])
-    setTrails({})
-    trailsRef.current = {}
-    setPsdData(null)
-    totalMsgsRef.current = 0
-    msgRateRef.current = 0
-    aircraftCountRef.current = 0
-    if (totalMsgsEl.current) totalMsgsEl.current.textContent = '0'
-    if (msgRateEl.current) msgRateEl.current.textContent = '0.0/s'
-    if (aircraftCountEl.current) aircraftCountEl.current.textContent = '0'
-  }, [sdrStop])
 
   // WebSocket connection — when adsb or adsb_dual mode is active
   const isAdsbActive = isMyMode || sdrStatus.active_mode === 'adsb_dual'
@@ -303,44 +282,6 @@ export default function ADSBPage() {
           Dual-frequency ADS-B tracking — 1090 MHz + 978 MHz UAT via Pi SDR node
         </p>
       </div>
-
-      <SdrModeBar
-        myMode="adsb"
-        isMyMode={isMyMode}
-        isOtherMode={isOtherMode}
-        activeMode={sdrStatus.active_mode}
-        loading={sdrLoading}
-        pid={sdrStatus.pid}
-        uptime={sdrStatus.uptime_s}
-        log={sdrStatus.log}
-        onStart={handleStart}
-        onStop={handleStop}
-      >
-        {/* Gain */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Gain</label>
-          <input
-            type="number"
-            value={gain}
-            onChange={e => setGain(parseInt(e.target.value) || 0)}
-            disabled={isMyMode}
-            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-200 disabled:opacity-40"
-          />
-        </div>
-        {/* Test mode */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={testMode}
-            onChange={e => setTestMode(e.target.checked)}
-            disabled={isMyMode}
-            className="rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500 disabled:opacity-40"
-          />
-          <span className={`text-sm ${testMode ? 'text-amber-400' : 'text-gray-400'}`}>
-            Test mode
-          </span>
-        </label>
-      </SdrModeBar>
 
       {/* Status + Stats */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
