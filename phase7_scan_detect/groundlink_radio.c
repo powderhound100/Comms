@@ -527,13 +527,23 @@ int main(int argc, char **argv) {
                 memcpy(hist_iq_q, iq_q + n_iq - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
 
-            /* FM demod on decimated IQ */
-            for (int i = 0; i < n_dec; i++) {
-                float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
-                float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
-                audio[i] = fast_atan2f(cj, cr);
-                prev_i = dec1_i[i];
-                prev_q = dec1_q[i];
+            /* FM demod on decimated IQ with spike limiter */
+            {
+                static float prev_demod = 0.0f;
+                for (int i = 0; i < n_dec; i++) {
+                    float cr = dec1_i[i] * prev_i + dec1_q[i] * prev_q;
+                    float cj = dec1_q[i] * prev_i - dec1_i[i] * prev_q;
+                    float d = fast_atan2f(cj, cr);
+                    /* Clamp sample-to-sample delta to prevent phase-jump pops */
+                    float delta = d - prev_demod;
+                    float max_delta = 0.5f;  /* ~max expected FM deviation per sample */
+                    if (delta > max_delta) d = prev_demod + max_delta;
+                    else if (delta < -max_delta) d = prev_demod - max_delta;
+                    audio[i] = d;
+                    prev_demod = d;
+                    prev_i = dec1_i[i];
+                    prev_q = dec1_q[i];
+                }
             }
 
             /* Decimate audio: 240k → /5 → 48k */
