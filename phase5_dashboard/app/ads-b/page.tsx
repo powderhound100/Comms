@@ -329,57 +329,51 @@ export default function ADSBPage() {
         {[
           { slot: 0, label: '1090 MHz Gain', mode: 'adsb_1090', color: 'cyan', defaultGain: 100 },
           { slot: 1, label: '978 MHz Gain', mode: 'adsb_978', color: 'orange', defaultGain: 100 },
-        ].map(sdr => (
-          <div key={sdr.slot} className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-xs font-semibold uppercase tracking-wider text-${sdr.color}-400`}>{sdr.label}</span>
-              <span className={`text-xs font-mono text-${sdr.color}-400 sdr-gain-label-${sdr.slot}`}
-                ref={(el) => {
-                  if (!el) return
-                  // Initialize from Pi status if available
-                  const slots = piHealth?.slots ?? {}
-                  const slotData = (slots as Record<string, any>)[String(sdr.slot)]
-                  const g = slotData?.config?.gain ?? sdr.defaultGain
-                  el.textContent = `${(g / 10).toFixed(1)} dB`
+        ].map(sdr => {
+          const slots = piHealth?.slots ?? {}
+          const slotData = (slots as Record<string, any>)[String(sdr.slot)]
+          const currentGain = slotData?.config?.gain ?? sdr.defaultGain
+          return (
+            <div key={sdr.slot} className="bg-gray-900 rounded-lg p-3 border border-gray-800">
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-xs font-semibold uppercase tracking-wider ${sdr.color === 'cyan' ? 'text-cyan-400' : 'text-orange-400'}`}>{sdr.label}</span>
+                <span className={`text-xs font-mono ${sdr.color === 'cyan' ? 'text-cyan-400' : 'text-orange-400'}`}
+                  id={`gain-label-${sdr.slot}`}
+                >{(currentGain / 10).toFixed(1)} dB</span>
+              </div>
+              <input
+                type="range"
+                min="0" max="496" step="10"
+                defaultValue={currentGain}
+                className={`w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer ${sdr.color === 'cyan' ? 'accent-cyan-500' : 'accent-orange-500'}`}
+                onInput={(e) => {
+                  const val = parseInt((e.target as HTMLInputElement).value)
+                  const label = document.getElementById(`gain-label-${sdr.slot}`)
+                  if (label) label.textContent = `${(val / 10).toFixed(1)} dB`
                 }}
-              >{(sdr.defaultGain / 10).toFixed(1)} dB</span>
+                onMouseUp={(e) => {
+                  const newGain = parseInt((e.target as HTMLInputElement).value)
+                  fetch(`/api/pi/sdr/${sdr.slot}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
+                  })
+                }}
+                onTouchEnd={(e) => {
+                  const newGain = parseInt((e.target as HTMLInputElement).value)
+                  fetch(`/api/pi/sdr/${sdr.slot}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
+                  })
+                }}
+              />
+              <div className="flex justify-between text-[9px] text-gray-600 mt-1 font-mono">
+                <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>49.6</span>
+              </div>
             </div>
-            <input
-              type="range"
-              min="0" max="496" step="10"
-              defaultValue={(() => {
-                const slots = piHealth?.slots ?? {}
-                const slotData = (slots as Record<string, any>)[String(sdr.slot)]
-                return slotData?.config?.gain ?? sdr.defaultGain
-              })()}
-              className={`w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer accent-${sdr.color}-500`}
-              onInput={(e) => {
-                const val = parseInt((e.target as HTMLInputElement).value)
-                const label = (e.target as HTMLInputElement).parentElement?.querySelector(`.sdr-gain-label-${sdr.slot}`) as HTMLElement
-                if (label) label.textContent = `${(val / 10).toFixed(1)} dB`
-              }}
-              onMouseUp={(e) => {
-                const newGain = parseInt((e.target as HTMLInputElement).value)
-                fetch(`/api/pi/sdr/${sdr.slot}/start`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
-                })
-              }}
-              onTouchEnd={(e) => {
-                const newGain = parseInt((e.target as HTMLInputElement).value)
-                fetch(`/api/pi/sdr/${sdr.slot}/start`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
-                })
-              }}
-            />
-            <div className="flex justify-between text-[9px] text-gray-600 mt-1 font-mono">
-              <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>49.6</span>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Aircraft Map */}
