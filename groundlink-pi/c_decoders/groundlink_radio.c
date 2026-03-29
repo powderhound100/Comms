@@ -251,7 +251,7 @@ static int decimate_real(const float *in, int n_in,
 /* High-pass at ~20 Hz; removes DC wander that causes low-freq pops */
 
 static void dc_block(float *audio, int n, float *x_prev, float *y_prev) {
-    float R = 0.9985f;  /* pole at ~23 Hz @ 48k */
+    float R = 0.997f;   /* pole at ~46 Hz @ 48k — more aggressive pop suppression */
     float xp = *x_prev, yp = *y_prev;
     for (int i = 0; i < n; i++) {
         float x = audio[i];
@@ -485,11 +485,19 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* Convert uint8 IQ → float [-1, 1] */
+        /* Convert uint8 IQ → float [-1, 1] with IQ DC removal */
         int n_iq = n_read / 2;
-        for (int i = 0; i < n_iq; i++) {
-            iq_i[i] = (raw_buf[2 * i]     - 127.5f) / 128.0f;
-            iq_q[i] = (raw_buf[2 * i + 1] - 127.5f) / 128.0f;
+        {
+            static float dc_i = 0.0f, dc_q = 0.0f;
+            float alpha_dc = 0.0001f;  /* very slow DC tracker */
+            for (int i = 0; i < n_iq; i++) {
+                float ri = (raw_buf[2 * i]     - 127.5f) / 128.0f;
+                float rq = (raw_buf[2 * i + 1] - 127.5f) / 128.0f;
+                dc_i += alpha_dc * (ri - dc_i);
+                dc_q += alpha_dc * (rq - dc_q);
+                iq_i[i] = ri - dc_i;
+                iq_q[i] = rq - dc_q;
+            }
         }
 
         /* ── Spectrum (every 3rd frame) ── */
@@ -595,6 +603,9 @@ int main(int argc, char **argv) {
                 memcpy(hist_audio, audio + n3 - FIR_TAPS, FIR_TAPS * sizeof(float));
             }
 
+            /* DC blocking: removes discriminator DC wander → kills low-freq pops */
+            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
+
             /* De-emphasis: 50 μs (NFM) */
             float alpha = 1.0f - expf(-1.0f / (16000.0f * 50e-6f));
             deemphasis(audio_dec, n_audio, alpha, &deemph_state);
@@ -636,6 +647,9 @@ int main(int argc, char **argv) {
 
             n_audio = n3;
             audio_rate = 48000;
+
+            /* DC blocking for discriminator output */
+            dc_block(audio_dec, n_audio, &dc_block_xprev, &dc_block_yprev);
 
         } else {  /* MODE_AM */
             /*
