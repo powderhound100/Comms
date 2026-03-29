@@ -721,11 +721,11 @@ int main(int argc, char **argv) {
              * Slow attack avoids reacting to every syllable; very slow release
              * holds gain during brief quiet passages (like a real FM receiver). */
             if (block_peak > agc_peak) {
-                agc_peak += 0.1f * (block_peak - agc_peak);    /* attack: ~10 blocks (~1s) */
+                agc_peak += 0.03f * (block_peak - agc_peak);   /* attack: ~33 blocks (~3.5s) */
             } else {
-                agc_peak += 0.002f * (block_peak - agc_peak);  /* release: ~500 blocks (~55s) */
+                agc_peak += 0.001f * (block_peak - agc_peak);  /* release: ~1000 blocks (~110s) */
             }
-            scale = (agc_peak > 1e-6f) ? (0.8f * 32767.0f / agc_peak) : 32767.0f;
+            scale = (agc_peak > 1e-6f) ? (0.7f * 32767.0f / agc_peak) : 32767.0f;
             squelch_gate = 1.0f;
         } else {
             /* AM/NFM: faster AGC + squelch */
@@ -760,8 +760,9 @@ int main(int argc, char **argv) {
             float t = (float)i / (float)n_audio;
             float g = prev_scale + t * (cur_scale - prev_scale);
             float s = audio_dec[i] * g;
-            if (s > 32767.0f) s = 32767.0f;
-            if (s < -32768.0f) s = -32768.0f;
+            /* Soft limiter: tanh-style compression above 80% to avoid hard clips */
+            if (s > 26000.0f) s = 26000.0f + 6767.0f * tanhf((s - 26000.0f) / 6767.0f);
+            else if (s < -26000.0f) s = -26000.0f - 6767.0f * tanhf((-s - 26000.0f) / 6767.0f);
             pcm[i] = (int16_t)s;
         }
         prev_scale = cur_scale;
