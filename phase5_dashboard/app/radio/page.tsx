@@ -247,6 +247,8 @@ export default function RadioPage() {
   const [signalStrength, setSignalStrength] = useState(-70)
   const [bufferPct, setBufferPct] = useState(0)
   const [showVisualizer, setShowVisualizer] = useState(true)
+  const [autoGain, setAutoGain] = useState(true)
+  const [currentGain, setCurrentGain] = useState(400)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pcmRef = useRef<Float32Array | null>(null)
@@ -384,6 +386,12 @@ export default function RadioPage() {
             if (data.psd_dbfs?.length) {
               setSignalStrength(Math.max(...data.psd_dbfs))
             }
+          } else if (data.type === 'gain') {
+            setCurrentGain(data.gain)
+            const label = document.querySelector('.radio-gain-label')
+            if (label) label.textContent = `${(data.gain / 10).toFixed(1)} dB`
+            const slider = document.querySelector('input.accent-fuchsia-500') as HTMLInputElement
+            if (slider) slider.value = String(data.gain)
           } else if (data.type === 'audio' && data.samples) {
             // Base64-encoded float32 PCM audio from radio backend
             if (actx.state === 'suspended') actx.resume()
@@ -574,32 +582,48 @@ export default function RadioPage() {
           {/* SDR Gain (Slot 2) */}
           <div className="min-w-[120px]">
             <label className="block text-[10px] uppercase tracking-wider text-gray-600 mb-1">
-              SDR Gain <span className="radio-gain-label text-fuchsia-400">40.0 dB</span>
+              SDR Gain <span className="radio-gain-label text-fuchsia-400">{(currentGain / 10).toFixed(1)} dB</span>
             </label>
-            <input
-              type="range"
-              min="0" max="496" step="10"
-              defaultValue={400}
-              className="w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer accent-fuchsia-500"
-              onInput={(e) => {
-                const val = parseInt((e.target as HTMLInputElement).value)
-                const label = document.querySelector('.radio-gain-label')
-                if (label) label.textContent = `${(val / 10).toFixed(1)} dB`
-              }}
-              onMouseUp={(e) => {
-                const newGain = parseInt((e.target as HTMLInputElement).value)
-                // Send gain change as a tune command over WebSocket (avoids slot restart)
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
-                }
-              }}
-              onTouchEnd={(e) => {
-                const newGain = parseInt((e.target as HTMLInputElement).value)
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
-                }
-              }}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="0" max="496" step="10"
+                value={currentGain}
+                disabled={autoGain}
+                className={`flex-1 h-2 bg-gray-800 rounded-full appearance-none cursor-pointer accent-fuchsia-500 ${autoGain ? 'opacity-40' : ''}`}
+                onInput={(e) => {
+                  const val = parseInt((e.target as HTMLInputElement).value)
+                  setCurrentGain(val)
+                }}
+                onMouseUp={(e) => {
+                  const newGain = parseInt((e.target as HTMLInputElement).value)
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
+                  }
+                }}
+                onTouchEnd={(e) => {
+                  const newGain = parseInt((e.target as HTMLInputElement).value)
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, gain: newGain }))
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  const next = !autoGain
+                  setAutoGain(next)
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'tune', freq_hz: freq, mode, auto_gain: next }))
+                  }
+                }}
+                className={`text-[9px] px-2 py-0.5 rounded font-bold tracking-wider ${
+                  autoGain ? 'bg-fuchsia-600 text-white' : 'bg-gray-800 text-gray-500'
+                }`}
+                title={autoGain ? 'Auto-gain ON: reduces gain on clipping' : 'Auto-gain OFF: manual gain control'}
+              >
+                AGC
+              </button>
+            </div>
           </div>
 
           {/* Volume */}

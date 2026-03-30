@@ -320,7 +320,7 @@ static void write_gain_frame(int gain_tenths) {
 static char g_device_serial[64] = "";
 static int  g_device_index = 0;
 static int  g_dc_offset = 200000;   /* Hz — tune off-center to avoid DC spike */
-static int  g_auto_gain = 0;        /* toggleable hardware AGC */
+static int  g_auto_gain = 1;        /* hardware AGC on by default */
 
 static int parse_args(int argc, char **argv,
                       uint32_t *freq, enum demod_mode *mode,
@@ -527,6 +527,11 @@ int main(int argc, char **argv) {
     int frame_count = 0;
     int slow_block_count = 0;
     float expected_block_ms = (float)CAPTURE_IQ / (float)rate * 1000.0f;
+
+#ifndef _WIN32
+    FILE *diag_fp = fopen("/tmp/groundlink_radio_diag.log", "w");
+    if (diag_fp) { setbuf(diag_fp, NULL); /* unbuffered */ }
+#endif
 
     /* ── Main loop ── */
     while (g_running) {
@@ -913,19 +918,31 @@ int main(int argc, char **argv) {
         clock_gettime(CLOCK_MONOTONIC, &t_end);
         float block_ms = (t_end.tv_sec - t_start.tv_sec) * 1000.0f +
                          (t_end.tv_nsec - t_start.tv_nsec) / 1e6f;
+
+        /* Log every block to diag file for first 200 blocks, then every 100th */
+        if (diag_fp && (frame_count <= 200 || frame_count % 100 == 0)) {
+            fprintf(diag_fp, "block %d: %.1fms total, %d audio samples, clip=%d\n",
+                    frame_count, block_ms, n_audio, clip_count);
+        }
+
         /* Warn if total block time (read + process) is significantly shorter
            than expected — means samples were already queued (backup) */
         if (block_ms < expected_block_ms * 0.5f) {
             slow_block_count++;
-            if (slow_block_count <= 5 || slow_block_count % 100 == 0) {
-                fprintf(stderr, "WARNING: block took %.1fms (expected ~%.0fms) — sample backup #%d\n",
-                        block_ms, expected_block_ms, slow_block_count);
+            if (diag_fp) {
+                fprintf(diag_fp, "*** BACKUP #%d: block %d took %.1fms (expected ~%.0fms)\n",
+                        slow_block_count, frame_count, block_ms, expected_block_ms);
             }
+            fprintf(stderr, "WARNING: block %.1fms (expected ~%.0fms) — backup #%d\n",
+                    block_ms, expected_block_ms, slow_block_count);
         }
 #endif
     }
 
     /* ── Cleanup ── */
+#ifndef _WIN32
+    if (diag_fp) fclose(diag_fp);
+#endif
     fprintf(stderr, "Shutting down...\n");
     rtlsdr_close(dev);
     free(raw_buf);
