@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OFDM Channel Estimation — Mathematical Reference</title>
+<style>
+  :root {
+    --bg: #1e1e2e; --surface: #181825; --card: #1e1e2e;
+    --text: #cdd6f4; --subtext: #a6adc8; --blue: #89b4fa;
+    --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+    --mauve: #cba6f7; --teal: #94e2d5; --peach: #fab387;
+    --border: #313244; --overlay: #6c7086;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.7;
+    max-width: 1200px; margin: 0 auto; padding: 20px 40px;
+  }
+  h1 { color: var(--blue); font-size: 2em; margin: 40px 0 10px; border-bottom: 2px solid var(--blue); padding-bottom: 8px; }
+  h2 { color: var(--mauve); font-size: 1.5em; margin: 35px 0 15px; border-left: 4px solid var(--mauve); padding-left: 12px; }
+  h3 { color: var(--teal); font-size: 1.2em; margin: 25px 0 10px; }
+  h4 { color: var(--peach); font-size: 1.05em; margin: 20px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--blue); }
+  code { background: var(--surface); padding: 2px 6px; border-radius: 4px; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 0.9em; color: var(--green); }
+  pre { background: var(--surface); padding: 16px; border-radius: 8px; overflow-x: auto; margin: 15px 0; border: 1px solid var(--border); }
+  pre code { padding: 0; background: none; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+  th { background: var(--surface); color: var(--blue); padding: 10px 12px; text-align: left; border-bottom: 2px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(137, 180, 250, 0.05); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 15px 0; }
+  .highlight { border-left: 4px solid var(--yellow); padding-left: 16px; margin: 15px 0; background: rgba(249, 226, 175, 0.05); padding: 12px 16px; border-radius: 0 8px 8px 0; }
+  .highlight-red { border-left: 4px solid var(--red); padding-left: 16px; margin: 15px 0; background: rgba(243, 139, 168, 0.05); padding: 12px 16px; border-radius: 0 8px 8px 0; }
+  .highlight-green { border-left: 4px solid var(--green); padding-left: 16px; margin: 15px 0; background: rgba(166, 227, 161, 0.05); padding: 12px 16px; border-radius: 0 8px 8px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 15px 0; }
+  .metric { text-align: center; padding: 15px; }
+  .metric .value { font-size: 2em; font-weight: bold; color: var(--green); }
+  .metric .label { color: var(--subtext); font-size: 0.85em; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; margin: 0 4px; }
+  .tag-pass { background: rgba(166, 227, 161, 0.2); color: var(--green); }
+  .tag-fail { background: rgba(243, 139, 168, 0.2); color: var(--red); }
+  .tag-warn { background: rgba(249, 226, 175, 0.2); color: var(--yellow); }
+  svg { max-width: 100%; }
+  .toc { background: var(--surface); padding: 20px 30px; border-radius: 12px; margin: 20px 0; }
+  .toc a { text-decoration: none; display: block; padding: 3px 0; }
+  .toc a:hover { color: var(--teal); }
+  .diagram { background: var(--surface); padding: 20px; border-radius: 12px; margin: 15px 0; text-align: center; overflow-x: auto; }
+  .diagram pre { background: none; border: none; text-align: left; display: inline-block; color: var(--blue); }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+  .compare-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 15px; }
+  .compare-card h4 { margin-top: 0; }
+  .math-block {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 24px; margin: 15px 0; font-size: 1.15em;
+    text-align: center; line-height: 2.0; overflow-x: auto;
+    font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', 'Segoe UI', serif;
+  }
+  .math-block .label { color: var(--overlay); font-size: 0.75em; float: right; font-family: 'Segoe UI', sans-serif; }
+  .math-inline {
+    font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', serif;
+    font-style: italic; font-size: 1.05em;
+  }
+  .var { font-style: italic; font-family: 'Cambria Math', 'STIX Two Math', serif; }
+  .vec { font-weight: bold; font-style: italic; font-family: 'Cambria Math', 'STIX Two Math', serif; }
+  .mat { font-weight: bold; font-family: 'Cambria Math', 'STIX Two Math', serif; }
+  .step-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; margin: 12px 0;
+  }
+  .step-num {
+    display: inline-block; background: var(--blue); color: var(--bg);
+    width: 28px; height: 28px; line-height: 28px; text-align: center;
+    border-radius: 50%; font-weight: bold; font-size: 0.85em; margin-right: 10px;
+  }
+  .matrix-dim { color: var(--peach); font-size: 0.85em; }
+  @media (max-width: 800px) { .grid, .compare-grid { grid-template-columns: 1fr; } body { padding: 10px 15px; } }
+</style>
+</head>
+<body>
+
+<!-- ===================================================================== -->
+<!-- HEADER -->
+<!-- ===================================================================== -->
+<div style="text-align:center; margin: 30px 0 40px;">
+  <h1 style="border:none; font-size: 2.5em; margin-bottom: 5px;">OFDM Channel Estimation</h1>
+  <p style="color: var(--subtext); font-size: 1.1em;">Mathematical Reference &mdash; LS, DFT-LMMSE, Equalization &amp; Soft Demapping</p>
+  <p style="color: var(--overlay); font-size: 0.9em;">March 2026 &middot; Full derivations for the ATSC 3.0 simulation system</p>
+</div>
+
+<div class="grid" style="grid-template-columns: repeat(4, 1fr);">
+  <div class="card metric"><div class="value">N<sub style="font-size:0.5em">p</sub>=13</div><div class="label">Pilots (FFT-64)</div></div>
+  <div class="card metric"><div class="value">N<sub style="font-size:0.5em">p</sub>=52</div><div class="label">Pilots (FFT-256)</div></div>
+  <div class="card metric"><div class="value" style="color:var(--red);">0.34</div><div class="label">Legacy BER (TU-6)</div></div>
+  <div class="card metric"><div class="value">0.0000</div><div class="label">LMMSE BER (TU-6)</div></div>
+</div>
+
+<!-- ===================================================================== -->
+<!-- TABLE OF CONTENTS -->
+<!-- ===================================================================== -->
+<div class="toc">
+  <h3 style="margin-top:0;">Contents</h3>
+  <a href="#secA">A. Subcarrier Map &mdash; Guard Bands, Pilots, Data, DC Null</a>
+  <a href="#secB">B. LS Estimation &mdash; Matrix Form &amp; Limitations</a>
+  <a href="#secC">C. Frequency &harr; Time Domain Relationship</a>
+  <a href="#secD">D. DFT-Based LMMSE &mdash; Full Derivation</a>
+  <a href="#secE">E. ZF vs MMSE Equalization</a>
+  <a href="#secF">F. Per-Subcarrier Noise &rarr; LLR Soft Demapping</a>
+  <a href="#secG">G. Channel Model Comparison</a>
+  <a href="#secH">H. System Performance Summary</a>
+</div>
+
+<!-- ===================================================================== -->
+<!-- SECTION A: SUBCARRIER MAP -->
+<!-- ===================================================================== -->
+<h1 id="secA">A. Subcarrier Map</h1>
+
+<p>An OFDM symbol of <span class="var">N</span> FFT bins is partitioned into guard bands (zeroed), a DC null, pilot subcarriers (known symbols), and data subcarriers (carrying information). The pilot spacing determines how well we can estimate the frequency-selective channel.</p>
+
+<h3>FFT = 64 &mdash; 52 used subcarriers, 13 pilots (every 4th)</h3>
+
+<div class="diagram" style="overflow-x:auto;">
+<svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="max-width:900px; width:100%;">
+  <!-- Background -->
+  <rect x="0" y="0" width="900" height="200" fill="#181825" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="22" text-anchor="middle" font-size="13" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">N = 64 FFT bins &mdash; Guard=6 each side, DC null at bin 32, 13 pilots (yellow), 39 data (blue)</text>
+
+  <!-- Bin labels and rectangles -->
+  <!-- Guard band left: bins 0-5 -->
+  <g>
+    <rect x="20" y="45" width="72" height="30" rx="3" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+    <text x="56" y="65" text-anchor="middle" font-size="10" fill="#6c7086" font-family="Segoe UI, sans-serif">Guard [0..5]</text>
+    <text x="56" y="88" text-anchor="middle" font-size="9" fill="#a6adc8" font-family="Segoe UI, sans-serif">6 bins = 0</text>
+  </g>
+
+  <!-- Used subcarriers: bins 6-31 (26 bins before DC) -->
+  <g>
+    <!-- Pilot positions within used: every 4th starting from first used subcarrier -->
+    <!-- Used bins 6..31: pilots at relative 0,4,8,12,16,20,24 = absolute 6,10,14,18,22,26,30 -->
+    <!-- 7 pilots, 19 data in lower half -->
+
+    <!-- Draw each bin as a thin rect -->
+    <!-- bin 6: pilot -->
+    <rect x="98" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 7-9: data -->
+    <rect x="109" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="120" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="131" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 10: pilot -->
+    <rect x="142" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 11-13: data -->
+    <rect x="153" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="164" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="175" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 14: pilot -->
+    <rect x="186" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 15-17: data -->
+    <rect x="197" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="208" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="219" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 18: pilot -->
+    <rect x="230" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 19-21: data -->
+    <rect x="241" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="252" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="263" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 22: pilot -->
+    <rect x="274" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 23-25: data -->
+    <rect x="285" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="296" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="307" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 26: pilot -->
+    <rect x="318" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 27-29: data -->
+    <rect x="329" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="340" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="351" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 30: pilot -->
+    <rect x="362" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 31: data -->
+    <rect x="373" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+  </g>
+
+  <!-- DC null: bin 32 -->
+  <g>
+    <rect x="384" y="45" width="12" height="30" rx="1" fill="#f38ba8" stroke="#181825" stroke-width="0.5" opacity="0.6"/>
+    <text x="390" y="95" text-anchor="middle" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif">DC</text>
+    <text x="390" y="105" text-anchor="middle" font-size="8" fill="#f38ba8" font-family="Segoe UI, sans-serif">[32]</text>
+  </g>
+
+  <!-- Upper half: bins 33-57 (25 bins after DC) -->
+  <!-- Pilots at relative positions: 1,5,9,13,17,21 = absolute 34,38,42,46,50,54 -->
+  <!-- 6 pilots, 19 data in upper half -->
+  <g>
+    <!-- bin 33: data -->
+    <rect x="398" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 34: pilot -->
+    <rect x="409" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 35-37: data -->
+    <rect x="420" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="431" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="442" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 38: pilot -->
+    <rect x="453" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 39-41: data -->
+    <rect x="464" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="475" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="486" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 42: pilot -->
+    <rect x="497" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 43-45: data -->
+    <rect x="508" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="519" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="530" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 46: pilot -->
+    <rect x="541" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 47-49: data -->
+    <rect x="552" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="563" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="574" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 50: pilot -->
+    <rect x="585" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 51-53: data -->
+    <rect x="596" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="607" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="618" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 54: pilot -->
+    <rect x="629" y="45" width="10" height="30" rx="1" fill="#f9e2af" stroke="#181825" stroke-width="0.5"/>
+    <!-- bin 55-57: data -->
+    <rect x="640" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="651" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+    <rect x="662" y="45" width="10" height="30" rx="1" fill="#89b4fa" stroke="#181825" stroke-width="0.5"/>
+  </g>
+
+  <!-- Guard band right: bins 58-63 -->
+  <g>
+    <rect x="678" y="45" width="72" height="30" rx="3" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+    <text x="714" y="65" text-anchor="middle" font-size="10" fill="#6c7086" font-family="Segoe UI, sans-serif">Guard [58..63]</text>
+    <text x="714" y="88" text-anchor="middle" font-size="9" fill="#a6adc8" font-family="Segoe UI, sans-serif">6 bins = 0</text>
+  </g>
+
+  <!-- Annotations -->
+  <!-- Pilot spacing bracket -->
+  <line x1="103" y1="40" x2="103" y2="33" stroke="#f9e2af" stroke-width="1"/>
+  <line x1="147" y1="40" x2="147" y2="33" stroke="#f9e2af" stroke-width="1"/>
+  <line x1="103" y1="33" x2="147" y2="33" stroke="#f9e2af" stroke-width="1"/>
+  <text x="125" y="29" text-anchor="middle" font-size="9" fill="#f9e2af" font-family="Segoe UI, sans-serif">spacing = 4</text>
+
+  <!-- Legend -->
+  <rect x="100" y="130" width="14" height="14" rx="2" fill="#f9e2af"/>
+  <text x="120" y="142" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Pilot (13 total, known BPSK +1)</text>
+
+  <rect x="100" y="152" width="14" height="14" rx="2" fill="#89b4fa"/>
+  <text x="120" y="164" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Data (39 total, carry QAM symbols)</text>
+
+  <rect x="420" y="130" width="14" height="14" rx="2" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+  <text x="440" y="142" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Guard band (zeroed, 6+6 = 12 bins)</text>
+
+  <rect x="420" y="152" width="14" height="14" rx="2" fill="#f38ba8" opacity="0.6"/>
+  <text x="440" y="164" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">DC null (bin 32, zeroed to avoid LO leakage)</text>
+
+  <!-- Summary stats -->
+  <text x="100" y="190" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Total: 64 bins = 6 guard + 26 used + 1 DC + 25 used + 6 guard = 64 &nbsp;|&nbsp; Used: 52 subcarriers (13 pilots + 39 data)</text>
+</svg>
+</div>
+
+<h3>FFT = 256 &mdash; 208 used subcarriers, 52 pilots (every 4th)</h3>
+
+<div class="diagram" style="overflow-x:auto;">
+<svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" style="max-width:900px; width:100%;">
+  <rect x="0" y="0" width="900" height="200" fill="#181825" rx="8"/>
+
+  <text x="450" y="22" text-anchor="middle" font-size="13" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">N = 256 FFT bins &mdash; Guard=24 each side, DC null at bin 128, 52 pilots (yellow), 156 data (blue)</text>
+
+  <!-- Guard band left: bins 0-23 -->
+  <rect x="20" y="50" width="100" height="28" rx="3" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+  <text x="70" y="68" text-anchor="middle" font-size="10" fill="#6c7086" font-family="Segoe UI, sans-serif">Guard [0..23]</text>
+  <text x="70" y="90" text-anchor="middle" font-size="9" fill="#a6adc8" font-family="Segoe UI, sans-serif">24 bins = 0</text>
+
+  <!-- Lower used band: bins 24-127 = 104 bins -->
+  <!-- Draw as a gradient strip with pilot ticks -->
+  <rect x="125" y="50" width="300" height="28" rx="3" fill="#89b4fa" opacity="0.3" stroke="#89b4fa" stroke-width="0.5"/>
+  <!-- Pilot tick marks every ~11.5 px (300px / 26 pilots) -->
+  <g>
+    <!-- 26 pilot ticks in lower band, evenly spaced for visual -->
+    <line x1="125" y1="50" x2="125" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="136.5" y1="50" x2="136.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="148" y1="50" x2="148" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="159.5" y1="50" x2="159.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="171" y1="50" x2="171" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="182.5" y1="50" x2="182.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="194" y1="50" x2="194" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="205.5" y1="50" x2="205.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="217" y1="50" x2="217" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="228.5" y1="50" x2="228.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="240" y1="50" x2="240" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="251.5" y1="50" x2="251.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="263" y1="50" x2="263" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="274.5" y1="50" x2="274.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="286" y1="50" x2="286" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="297.5" y1="50" x2="297.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="309" y1="50" x2="309" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="320.5" y1="50" x2="320.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="332" y1="50" x2="332" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="343.5" y1="50" x2="343.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="355" y1="50" x2="355" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="366.5" y1="50" x2="366.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="378" y1="50" x2="378" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="389.5" y1="50" x2="389.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="401" y1="50" x2="401" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="412.5" y1="50" x2="412.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+  </g>
+  <text x="275" y="44" text-anchor="middle" font-size="9" fill="#89b4fa" font-family="Segoe UI, sans-serif">104 subcarriers (bins 24..127) &mdash; 26 pilots + 78 data</text>
+
+  <!-- DC null -->
+  <rect x="428" y="50" width="10" height="28" rx="1" fill="#f38ba8" opacity="0.6" stroke="#f38ba8" stroke-width="0.5"/>
+  <text x="433" y="95" text-anchor="middle" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif">DC [128]</text>
+
+  <!-- Upper used band: bins 129-231 = 103 bins (shifted by 1 from DC) -->
+  <rect x="442" y="50" width="300" height="28" rx="3" fill="#89b4fa" opacity="0.3" stroke="#89b4fa" stroke-width="0.5"/>
+  <g>
+    <!-- 26 pilot ticks in upper band -->
+    <line x1="442" y1="50" x2="442" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="453.5" y1="50" x2="453.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="465" y1="50" x2="465" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="476.5" y1="50" x2="476.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="488" y1="50" x2="488" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="499.5" y1="50" x2="499.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="511" y1="50" x2="511" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="522.5" y1="50" x2="522.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="534" y1="50" x2="534" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="545.5" y1="50" x2="545.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="557" y1="50" x2="557" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="568.5" y1="50" x2="568.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="580" y1="50" x2="580" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="591.5" y1="50" x2="591.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="603" y1="50" x2="603" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="614.5" y1="50" x2="614.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="626" y1="50" x2="626" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="637.5" y1="50" x2="637.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="649" y1="50" x2="649" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="660.5" y1="50" x2="660.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="672" y1="50" x2="672" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="683.5" y1="50" x2="683.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="695" y1="50" x2="695" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="706.5" y1="50" x2="706.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="718" y1="50" x2="718" y2="78" stroke="#f9e2af" stroke-width="2"/>
+    <line x1="729.5" y1="50" x2="729.5" y2="78" stroke="#f9e2af" stroke-width="2"/>
+  </g>
+  <text x="592" y="44" text-anchor="middle" font-size="9" fill="#89b4fa" font-family="Segoe UI, sans-serif">104 subcarriers (bins 129..232) &mdash; 26 pilots + 78 data</text>
+
+  <!-- Guard band right: bins 232-255 -->
+  <rect x="747" y="50" width="100" height="28" rx="3" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+  <text x="797" y="68" text-anchor="middle" font-size="10" fill="#6c7086" font-family="Segoe UI, sans-serif">Guard [232..255]</text>
+  <text x="797" y="90" text-anchor="middle" font-size="9" fill="#a6adc8" font-family="Segoe UI, sans-serif">24 bins = 0</text>
+
+  <!-- Pilot spacing annotation -->
+  <line x1="125" y1="45" x2="125" y2="37" stroke="#f9e2af" stroke-width="1"/>
+  <line x1="136.5" y1="45" x2="136.5" y2="37" stroke="#f9e2af" stroke-width="1"/>
+  <line x1="125" y1="37" x2="136.5" y2="37" stroke="#f9e2af" stroke-width="1"/>
+  <text x="130.75" y="33" text-anchor="middle" font-size="8" fill="#f9e2af" font-family="Segoe UI, sans-serif">4</text>
+
+  <!-- Legend -->
+  <rect x="100" y="120" width="14" height="14" rx="2" fill="#f9e2af"/>
+  <text x="120" y="132" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Pilot (52 total) &mdash; yellow ticks on blue band</text>
+
+  <rect x="100" y="142" width="14" height="14" rx="2" fill="#89b4fa" opacity="0.3" stroke="#89b4fa" stroke-width="0.5"/>
+  <text x="120" y="154" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Data (156 total) &mdash; blue background regions</text>
+
+  <rect x="420" y="120" width="14" height="14" rx="2" fill="#313244" stroke="#6c7086" stroke-width="0.5"/>
+  <text x="440" y="132" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">Guard band (24+24 = 48 bins zeroed)</text>
+
+  <rect x="420" y="142" width="14" height="14" rx="2" fill="#f38ba8" opacity="0.6"/>
+  <text x="440" y="154" font-size="11" fill="#cdd6f4" font-family="Segoe UI, sans-serif">DC null (bin 128)</text>
+
+  <text x="100" y="185" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Total: 256 bins = 24 guard + 104 lower + 1 DC + 104 upper + 24 guard - 1 = 256 &nbsp;|&nbsp; Used: 208 subcarriers (52 pilots + 156 data)</text>
+</svg>
+</div>
+
+<div class="highlight">
+  <strong>Why pilot spacing matters:</strong> With pilots every 4th subcarrier, the channel transfer function
+  is sampled at the Nyquist rate for a channel impulse response of length <span class="var">L</span> &le; <span class="var">N</span>/4.
+  For FFT=64, this means <span class="var">L</span> &le; 16 taps can be perfectly reconstructed. For FFT=256,
+  <span class="var">L</span> &le; 64 taps. The guard bands prevent spectral leakage into adjacent channels,
+  and the DC null avoids DC offset from analog front-end impairments.
+</div>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION B: LS ESTIMATION -->
+<!-- ===================================================================== -->
+<h1 id="secB">B. Least-Squares (LS) Estimation &mdash; Matrix Form</h1>
+
+<h3>Signal Model at Pilot Subcarriers</h3>
+
+<p>At each pilot subcarrier index <span class="var">k</span> &isin; {<span class="var">p</span><sub>0</sub>, <span class="var">p</span><sub>1</sub>, ..., <span class="var">p</span><sub><span class="var">N<sub>p</sub></span>&minus;1</sub>}, the received symbol is:</p>
+
+<div class="math-block">
+  <span class="var">Y</span>[<span class="var">k</span>] = <span class="var">H</span>[<span class="var">k</span>] &middot; <span class="var">X</span>[<span class="var">k</span>] + <span class="var">W</span>[<span class="var">k</span>]
+  <span class="label">(B.1)</span>
+</div>
+
+<p>where <span class="var">Y</span>[<span class="var">k</span>] is the received frequency-domain sample, <span class="var">H</span>[<span class="var">k</span>] is the true channel frequency response, <span class="var">X</span>[<span class="var">k</span>] is the known pilot symbol (typically BPSK +1), and <span class="var">W</span>[<span class="var">k</span>] is additive white Gaussian noise.</p>
+
+<h3>Matrix Form</h3>
+
+<p>Stacking all <span class="var">N<sub>p</sub></span> pilot observations into vectors:</p>
+
+<div class="math-block">
+  <span class="vec">Y</span><sub>p</sub> = diag(<span class="vec">X</span><sub>p</sub>) &middot; <span class="vec">H</span><sub>p</sub> + <span class="vec">W</span><sub>p</sub>
+  <span class="label">(B.2)</span>
+</div>
+
+<p>where:</p>
+<ul style="margin-left: 30px; margin-bottom: 10px;">
+  <li><span class="vec">Y</span><sub>p</sub> &isin; &Copf;<sup><span class="var">N<sub>p</sub></span>&times;1</sup> &mdash; received symbols at pilot positions</li>
+  <li><span class="vec">X</span><sub>p</sub> &isin; &Copf;<sup><span class="var">N<sub>p</sub></span>&times;1</sup> &mdash; known transmitted pilot symbols</li>
+  <li>diag(<span class="vec">X</span><sub>p</sub>) &isin; &Copf;<sup><span class="var">N<sub>p</sub></span>&times;<span class="var">N<sub>p</sub></span></sup> &mdash; diagonal matrix of pilot values</li>
+  <li><span class="vec">H</span><sub>p</sub> &isin; &Copf;<sup><span class="var">N<sub>p</sub></span>&times;1</sup> &mdash; true channel at pilot frequencies</li>
+  <li><span class="vec">W</span><sub>p</sub> &isin; &Copf;<sup><span class="var">N<sub>p</sub></span>&times;1</sup> &mdash; noise at pilot frequencies, <span class="var">W</span><sub><span class="var">k</span></sub> ~ CN(0, &sigma;<sup>2</sup>)</li>
+</ul>
+
+<h3>LS Solution</h3>
+
+<p>The LS estimate simply divides each received pilot by the known transmitted pilot (element-wise):</p>
+
+<div class="math-block">
+  <span class="vec">H&#770;</span><sub>LS</sub> = diag(<span class="vec">X</span><sub>p</sub>)<sup>&minus;1</sup> &middot; <span class="vec">Y</span><sub>p</sub> = <span class="vec">Y</span><sub>p</sub> &oslash; <span class="vec">X</span><sub>p</sub>
+  <span class="label">(B.3)</span>
+</div>
+
+<p>Since <span class="var">X</span><sub>p</sub>[<span class="var">k</span>] = +1 for BPSK pilots, this simplifies to:</p>
+
+<div class="math-block">
+  <span class="var">H&#770;</span><sub>LS</sub>[<span class="var">k</span>] = <span class="var">Y</span>[<span class="var">k</span>] / <span class="var">X</span>[<span class="var">k</span>] = <span class="var">Y</span>[<span class="var">k</span>] = <span class="var">H</span>[<span class="var">k</span>] + <span class="var">W</span>[<span class="var">k</span>]
+  <span class="label">(B.4)</span>
+</div>
+
+<p>The LS estimate is <strong>unbiased</strong> but has variance equal to the noise variance at each pilot:</p>
+
+<div class="math-block">
+  Var(<span class="var">H&#770;</span><sub>LS</sub>[<span class="var">k</span>]) = &sigma;<sup>2</sup> / |<span class="var">X</span>[<span class="var">k</span>]|<sup>2</sup> = &sigma;<sup>2</sup>
+  <span class="label">(B.5)</span>
+</div>
+
+<h3>Why LS Fails with Few Pilots</h3>
+
+<div class="highlight-red">
+  <strong>The interpolation problem:</strong> After obtaining <span class="var">H&#770;</span><sub>LS</sub> at the <span class="var">N<sub>p</sub></span> pilot positions, we need the channel estimate at all <span class="var">N<sub>used</sub></span> subcarriers (including data positions). Simple linear interpolation between noisy pilot estimates propagates and amplifies noise.
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--red);">Legacy System (4 pilots)</h4>
+    <p>With only 4 pilots across 52 subcarriers, each pilot "covers" 13 subcarriers. The linear interpolation between pilots:</p>
+    <ul style="margin-left: 20px;">
+      <li>Cannot track rapid channel variations</li>
+      <li>Noise at one pilot corrupts 13 data estimates</li>
+      <li>Zero noise averaging &mdash; each pilot is used once</li>
+      <li>Pilot spacing &gt;&gt; coherence bandwidth for frequency-selective channels</li>
+    </ul>
+    <p style="margin-top:10px;"><span class="tag tag-fail">BER = 0.19 (two-tap)</span></p>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--green);">New System (13 pilots, FFT=64)</h4>
+    <p>With 13 pilots every 4 subcarriers, combined with DFT-based LMMSE:</p>
+    <ul style="margin-left: 20px;">
+      <li>Nyquist sampling of channel in frequency domain</li>
+      <li>DFT-LMMSE regularization suppresses noise</li>
+      <li>All 13 pilots contribute to a joint time-domain estimate</li>
+      <li>Exploits channel sparsity (few taps in time domain)</li>
+    </ul>
+    <p style="margin-top:10px;"><span class="tag tag-pass">BER = 0.0000 (two-tap)</span></p>
+  </div>
+</div>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION C: FREQUENCY <-> TIME -->
+<!-- ===================================================================== -->
+<h1 id="secC">C. Frequency &harr; Time Domain Relationship</h1>
+
+<h3>The DFT Link</h3>
+
+<p>The channel frequency response <span class="vec">H</span> is the DFT of the channel impulse response <span class="vec">h</span>.
+If the channel has <span class="var">L</span> taps (time-domain coefficients), this relationship is expressed as a matrix multiplication:</p>
+
+<div class="math-block">
+  <span class="vec">H</span> = <span class="mat">F</span> &middot; <span class="vec">h</span>
+  <span class="label">(C.1)</span>
+  <br>
+  <span class="matrix-dim">(<span class="var">N</span>&times;1)</span> = <span class="matrix-dim">(<span class="var">N</span>&times;<span class="var">L</span>)</span> &middot; <span class="matrix-dim">(<span class="var">L</span>&times;1)</span>
+</div>
+
+<p>where <span class="mat">F</span> is the <strong>partial DFT matrix</strong> with entries:</p>
+
+<div class="math-block">
+  <span class="mat">F</span>[<span class="var">k</span>, <span class="var">l</span>] = exp(&minus;j 2&pi; <span class="var">k l</span> / <span class="var">N</span>)
+  &nbsp;&nbsp;&nbsp; <span class="var">k</span> = 0, 1, ..., <span class="var">N</span>&minus;1 &nbsp;&nbsp; <span class="var">l</span> = 0, 1, ..., <span class="var">L</span>&minus;1
+  <span class="label">(C.2)</span>
+</div>
+
+<h3>At Pilot Subcarriers Only</h3>
+
+<p>We only observe the channel at pilot positions. Extracting the rows of <span class="mat">F</span> corresponding to pilot indices gives:</p>
+
+<div class="math-block">
+  <span class="vec">H</span><sub>p</sub> = <span class="mat">F</span><sub>p</sub> &middot; <span class="vec">h</span>
+  <span class="label">(C.3)</span>
+  <br>
+  <span class="matrix-dim">(<span class="var">N<sub>p</sub></span>&times;1)</span> = <span class="matrix-dim">(<span class="var">N<sub>p</sub></span>&times;<span class="var">L</span>)</span> &middot; <span class="matrix-dim">(<span class="var">L</span>&times;1)</span>
+</div>
+
+<p>where <span class="mat">F</span><sub>p</sub> selects only the rows of <span class="mat">F</span> at pilot subcarrier indices {<span class="var">p</span><sub>0</sub>, <span class="var">p</span><sub>1</sub>, ..., <span class="var">p</span><sub><span class="var">N<sub>p</sub></span>&minus;1</sub>}.</p>
+
+<h3>Matrix Dimensions for N=64, L=13</h3>
+
+<div class="diagram" style="overflow-x:auto;">
+<svg viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg" style="max-width:800px; width:100%;">
+  <rect x="0" y="0" width="800" height="320" fill="#181825" rx="8"/>
+
+  <text x="400" y="25" text-anchor="middle" font-size="14" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">Matrix Dimensions: Full DFT Relationship (N=64, L=13)</text>
+
+  <!-- H vector (64x1) -->
+  <rect x="30" y="50" width="30" height="180" rx="4" fill="none" stroke="#89b4fa" stroke-width="2"/>
+  <text x="45" y="145" text-anchor="middle" font-size="11" fill="#89b4fa" font-family="Segoe UI, sans-serif" transform="rotate(-90, 45, 145)">H (64&times;1)</text>
+  <text x="45" y="245" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Channel</text>
+  <text x="45" y="258" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">freq. resp.</text>
+
+  <!-- = sign -->
+  <text x="85" y="145" text-anchor="middle" font-size="22" fill="#cdd6f4" font-family="Segoe UI, sans-serif">=</text>
+
+  <!-- F matrix (64x13) -->
+  <rect x="110" y="50" width="90" height="180" rx="4" fill="none" stroke="#f9e2af" stroke-width="2"/>
+  <text x="155" y="145" text-anchor="middle" font-size="11" fill="#f9e2af" font-family="Segoe UI, sans-serif">F (64&times;13)</text>
+  <text x="155" y="245" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Partial DFT</text>
+  <text x="155" y="258" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">matrix</text>
+
+  <!-- dot -->
+  <text x="217" y="145" text-anchor="middle" font-size="22" fill="#cdd6f4" font-family="Segoe UI, sans-serif">&middot;</text>
+
+  <!-- h vector (13x1) -->
+  <rect x="235" y="85" width="30" height="110" rx="4" fill="none" stroke="#a6e3a1" stroke-width="2"/>
+  <text x="250" y="145" text-anchor="middle" font-size="11" fill="#a6e3a1" font-family="Segoe UI, sans-serif" transform="rotate(-90, 250, 145)">h (13&times;1)</text>
+  <text x="250" y="245" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">CIR taps</text>
+
+  <!-- Separator -->
+  <line x1="310" y1="40" x2="310" y2="280" stroke="#313244" stroke-width="1" stroke-dasharray="4"/>
+
+  <!-- At pilots: -->
+  <text x="560" y="25" text-anchor="middle" font-size="14" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">At Pilots Only (N<tspan font-size="10" dy="3">p</tspan><tspan dy="-3">=13, L=13): Determined System</tspan></text>
+
+  <!-- H_p vector (13x1) -->
+  <rect x="370" y="85" width="30" height="110" rx="4" fill="none" stroke="#89b4fa" stroke-width="2"/>
+  <text x="385" y="145" text-anchor="middle" font-size="10" fill="#89b4fa" font-family="Segoe UI, sans-serif" transform="rotate(-90, 385, 145)">H_p (13&times;1)</text>
+  <text x="385" y="215" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Channel at</text>
+  <text x="385" y="228" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">pilots</text>
+
+  <!-- = sign -->
+  <text x="425" y="145" text-anchor="middle" font-size="22" fill="#cdd6f4" font-family="Segoe UI, sans-serif">=</text>
+
+  <!-- F_p matrix (13x13) -->
+  <rect x="450" y="85" width="110" height="110" rx="4" fill="none" stroke="#f9e2af" stroke-width="2"/>
+  <text x="505" y="140" text-anchor="middle" font-size="11" fill="#f9e2af" font-family="Segoe UI, sans-serif">F<tspan font-size="8" dy="3">p</tspan><tspan dy="-3"> (13&times;13)</tspan></text>
+  <text x="505" y="215" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">Pilot DFT</text>
+  <text x="505" y="228" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">(square!)</text>
+
+  <!-- dot -->
+  <text x="577" y="145" text-anchor="middle" font-size="22" fill="#cdd6f4" font-family="Segoe UI, sans-serif">&middot;</text>
+
+  <!-- h vector (13x1) -->
+  <rect x="595" y="85" width="30" height="110" rx="4" fill="none" stroke="#a6e3a1" stroke-width="2"/>
+  <text x="610" y="145" text-anchor="middle" font-size="10" fill="#a6e3a1" font-family="Segoe UI, sans-serif" transform="rotate(-90, 610, 145)">h (13&times;1)</text>
+  <text x="610" y="215" text-anchor="middle" font-size="10" fill="#a6adc8" font-family="Segoe UI, sans-serif">CIR taps</text>
+
+  <!-- Key insight arrow -->
+  <line x1="505" y1="200" x2="505" y2="270" stroke="#a6e3a1" stroke-width="1.5" marker-end="url(#arrowG)"/>
+  <defs><marker id="arrowG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M 0 0 L 8 3 L 0 6 Z" fill="#a6e3a1"/></marker></defs>
+  <rect x="380" y="275" width="250" height="35" rx="6" fill="rgba(166,227,161,0.1)" stroke="#a6e3a1" stroke-width="1"/>
+  <text x="505" y="296" text-anchor="middle" font-size="11" fill="#a6e3a1" font-family="Segoe UI, sans-serif" font-weight="bold">SQUARE &rArr; exactly determined system</text>
+  <text x="505" y="308" text-anchor="middle" font-size="9" fill="#a6adc8" font-family="Segoe UI, sans-serif">N_p = L = 13 &rArr; unique solution exists (with regularization for noise)</text>
+</svg>
+</div>
+
+<div class="highlight">
+  <strong>Key insight:</strong> With <span class="var">N<sub>p</sub></span> = 13 pilots and <span class="var">L</span> = 13 channel taps, the system
+  <span class="vec">H</span><sub>p</sub> = <span class="mat">F</span><sub>p</sub> <span class="vec">h</span> is <em>exactly determined</em> &mdash; <span class="mat">F</span><sub>p</sub> is a 13&times;13 square matrix.
+  In the noiseless case, we can solve <span class="vec">h</span> = <span class="mat">F</span><sub>p</sub><sup>&minus;1</sup> <span class="vec">H</span><sub>p</sub> exactly.
+  With noise, we add Tikhonov regularization (Section D) to stabilize the inversion.
+  <br><br>
+  For <span class="var">N</span>=256 with <span class="var">N<sub>p</sub></span>=52 pilots and <span class="var">L</span>=52, the system is also exactly determined. If
+  <span class="var">L</span> &lt; <span class="var">N<sub>p</sub></span>, the system is overdetermined and the regularized LS provides noise averaging.
+</div>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION D: DFT-LMMSE -->
+<!-- ===================================================================== -->
+<h1 id="secD">D. DFT-Based LMMSE &mdash; Full Derivation</h1>
+
+<p>The DFT-based LMMSE estimator exploits the fact that the channel impulse response <span class="vec">h</span> has
+finite length <span class="var">L</span> &lt;&lt; <span class="var">N</span>, making it sparse in the time domain. We estimate <span class="vec">h</span> from the LS pilot
+estimates, then reconstruct the full frequency response <span class="vec">H</span> at all subcarriers.</p>
+
+<div class="step-box">
+  <h4><span class="step-num">1</span> Obtain LS Estimates at Pilots</h4>
+  <p>From Section B, we have the LS channel estimate at each pilot subcarrier:</p>
+  <div class="math-block">
+    <span class="vec">H&#770;</span><sub>LS</sub> = <span class="vec">Y</span><sub>p</sub> &oslash; <span class="vec">X</span><sub>p</sub> = <span class="vec">H</span><sub>p</sub> + <span class="vec">W</span><sub>p</sub> &oslash; <span class="vec">X</span><sub>p</sub>
+    <span class="label">(D.1)</span>
+  </div>
+  <p>This gives us <span class="var">N<sub>p</sub></span> noisy samples of the true channel frequency response.</p>
+</div>
+
+<div class="step-box">
+  <h4><span class="step-num">2</span> Form Partial DFT Matrix <span class="mat">F</span><sub>p</sub></h4>
+  <p>Construct the <span class="var">N<sub>p</sub></span> &times; <span class="var">L</span> DFT matrix using only the pilot subcarrier indices:</p>
+  <div class="math-block">
+    [<span class="mat">F</span><sub>p</sub>]<sub><span class="var">m</span>,<span class="var">l</span></sub> = exp(&minus;j 2&pi; <span class="var">p<sub>m</sub></span> <span class="var">l</span> / <span class="var">N</span>)
+    &nbsp;&nbsp;&nbsp; <span class="var">m</span> = 0, ..., <span class="var">N<sub>p</sub></span>&minus;1 &nbsp;&nbsp; <span class="var">l</span> = 0, ..., <span class="var">L</span>&minus;1
+    <span class="label">(D.2)</span>
+  </div>
+  <p>where <span class="var">p<sub>m</sub></span> is the absolute FFT bin index of the <span class="var">m</span>-th pilot. Each row of <span class="mat">F</span><sub>p</sub> is a DFT
+  basis vector evaluated at one pilot frequency, and each column corresponds to one channel tap delay.</p>
+</div>
+
+<div class="step-box">
+  <h4><span class="step-num">3</span> Regularized Least Squares (Tikhonov)</h4>
+  <p>We want to solve <span class="vec">H&#770;</span><sub>LS</sub> = <span class="mat">F</span><sub>p</sub> <span class="vec">h</span> for <span class="vec">h</span>,
+  but direct inversion amplifies noise. Instead, we solve the regularized problem:</p>
+
+  <div class="math-block">
+    <span class="vec">h&#770;</span> = arg min<sub><span class="vec">h</span></sub> { &Vert;<span class="vec">H&#770;</span><sub>LS</sub> &minus; <span class="mat">F</span><sub>p</sub><span class="vec">h</span>&Vert;<sup>2</sup> + &lambda; &Vert;<span class="vec">h</span>&Vert;<sup>2</sup> }
+    <span class="label">(D.3)</span>
+  </div>
+
+  <p>Taking the derivative, setting to zero, and solving gives the closed-form solution:</p>
+
+  <div class="math-block" style="border-color: var(--green);">
+    <span class="vec">h&#770;</span> = (<span class="mat">F</span><sub>p</sub><sup>H</sup> <span class="mat">F</span><sub>p</sub> + &lambda;<span class="mat">I</span>)<sup>&minus;1</sup> <span class="mat">F</span><sub>p</sub><sup>H</sup> <span class="vec">H&#770;</span><sub>LS</sub>
+    <span class="label">(D.4)</span>
+    <br>
+    <span class="matrix-dim">(<span class="var">L</span>&times;1)</span> = <span class="matrix-dim">(<span class="var">L</span>&times;<span class="var">L</span>)</span><sup>&minus;1</sup> <span class="matrix-dim">(<span class="var">L</span>&times;<span class="var">N<sub>p</sub></span>)</span> <span class="matrix-dim">(<span class="var">N<sub>p</sub></span>&times;1)</span>
+  </div>
+
+  <p>where the superscript <sup>H</sup> denotes conjugate transpose (Hermitian).</p>
+</div>
+
+<div class="step-box">
+  <h4><span class="step-num">4</span> Full Frequency Reconstruction</h4>
+  <p>Once we have the time-domain estimate <span class="vec">h&#770;</span>, we reconstruct the channel at <strong>all</strong> <span class="var">N</span> subcarriers using the full DFT matrix:</p>
+
+  <div class="math-block" style="border-color: var(--green);">
+    <span class="vec">H&#770;</span> = <span class="mat">F</span><sub>full</sub> &middot; <span class="vec">h&#770;</span>
+    <span class="label">(D.5)</span>
+    <br>
+    <span class="matrix-dim">(<span class="var">N</span>&times;1)</span> = <span class="matrix-dim">(<span class="var">N</span>&times;<span class="var">L</span>)</span> &middot; <span class="matrix-dim">(<span class="var">L</span>&times;1)</span>
+  </div>
+
+  <p>where <span class="mat">F</span><sub>full</sub> has entries [<span class="mat">F</span><sub>full</sub>]<sub><span class="var">k</span>,<span class="var">l</span></sub> = exp(&minus;j 2&pi; <span class="var">kl</span>/<span class="var">N</span>) for all <span class="var">k</span> = 0, ..., <span class="var">N</span>&minus;1.
+  This smoothly interpolates the channel estimate to data subcarriers without the noise amplification of simple LS interpolation.</p>
+</div>
+
+<h3>Tikhonov Regularization &mdash; Geometric Interpretation</h3>
+
+<div class="diagram" style="overflow-x:auto;">
+<svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" style="max-width:700px; width:100%;">
+  <rect x="0" y="0" width="700" height="300" fill="#181825" rx="8"/>
+
+  <text x="350" y="22" text-anchor="middle" font-size="13" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">Tikhonov Regularization: Shrinkage in Eigenspace</text>
+
+  <!-- Axes for unregularized -->
+  <text x="150" y="50" text-anchor="middle" font-size="11" fill="#f38ba8" font-family="Segoe UI, sans-serif" font-weight="bold">Unregularized LS (&lambda; = 0)</text>
+  <line x1="50" y1="170" x2="250" y2="170" stroke="#6c7086" stroke-width="1"/>
+  <line x1="150" y1="70" x2="150" y2="270" stroke="#6c7086" stroke-width="1"/>
+  <text x="253" y="175" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif">h&#770;<tspan font-size="7" dy="2">1</tspan></text>
+  <text x="148" y="65" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif">h&#770;<tspan font-size="7" dy="2">2</tspan></text>
+
+  <!-- True solution dot -->
+  <circle cx="170" cy="140" r="4" fill="#a6e3a1"/>
+  <text x="182" y="137" font-size="9" fill="#a6e3a1" font-family="Segoe UI, sans-serif">true h</text>
+
+  <!-- Noisy LS solutions scattered widely -->
+  <circle cx="220" cy="90" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="95" cy="200" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="230" cy="210" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="80" cy="100" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="200" cy="80" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="100" cy="240" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="210" cy="230" r="3" fill="#f38ba8" opacity="0.6"/>
+  <circle cx="70" cy="130" r="3" fill="#f38ba8" opacity="0.6"/>
+
+  <!-- Large variance ellipse -->
+  <ellipse cx="150" cy="160" rx="80" ry="70" fill="none" stroke="#f38ba8" stroke-width="1" stroke-dasharray="4" opacity="0.5"/>
+  <text x="150" y="250" text-anchor="middle" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif">High variance, noise amplified</text>
+  <text x="150" y="262" text-anchor="middle" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif">along small eigenvalues</text>
+
+  <!-- Separator -->
+  <line x1="300" y1="40" x2="300" y2="280" stroke="#313244" stroke-width="1" stroke-dasharray="4"/>
+
+  <!-- Axes for regularized -->
+  <text x="500" y="50" text-anchor="middle" font-size="11" fill="#a6e3a1" font-family="Segoe UI, sans-serif" font-weight="bold">Regularized LMMSE (&lambda; = &sigma;&sup2; &middot; L)</text>
+  <line x1="400" y1="170" x2="600" y2="170" stroke="#6c7086" stroke-width="1"/>
+  <line x1="500" y1="70" x2="500" y2="270" stroke="#6c7086" stroke-width="1"/>
+  <text x="603" y="175" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif">h&#770;<tspan font-size="7" dy="2">1</tspan></text>
+  <text x="498" y="65" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif">h&#770;<tspan font-size="7" dy="2">2</tspan></text>
+
+  <!-- True solution dot -->
+  <circle cx="520" cy="140" r="4" fill="#a6e3a1"/>
+  <text x="532" y="137" font-size="9" fill="#a6e3a1" font-family="Segoe UI, sans-serif">true h</text>
+
+  <!-- Regularized solutions clustered tightly, slightly biased toward origin -->
+  <circle cx="510" cy="142" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="505" cy="148" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="515" cy="138" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="508" cy="145" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="512" cy="140" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="506" cy="144" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="514" cy="136" r="3" fill="#89b4fa" opacity="0.7"/>
+  <circle cx="503" cy="150" r="3" fill="#89b4fa" opacity="0.7"/>
+
+  <!-- Small variance ellipse -->
+  <ellipse cx="510" cy="143" rx="15" ry="12" fill="none" stroke="#89b4fa" stroke-width="1" stroke-dasharray="4" opacity="0.7"/>
+
+  <!-- Shrinkage arrow -->
+  <line x1="500" y1="170" x2="508" y2="148" stroke="#f9e2af" stroke-width="1.5" stroke-dasharray="3" marker-end="url(#arrowY)"/>
+  <defs><marker id="arrowY" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M 0 0 L 8 3 L 0 6 Z" fill="#f9e2af"/></marker></defs>
+  <text x="470" y="185" font-size="9" fill="#f9e2af" font-family="Segoe UI, sans-serif">shrinkage</text>
+  <text x="470" y="196" font-size="9" fill="#f9e2af" font-family="Segoe UI, sans-serif">toward origin</text>
+
+  <text x="500" y="250" text-anchor="middle" font-size="9" fill="#89b4fa" font-family="Segoe UI, sans-serif">Low variance, small bias</text>
+  <text x="500" y="262" text-anchor="middle" font-size="9" fill="#89b4fa" font-family="Segoe UI, sans-serif">MSE = bias&sup2; + variance minimized</text>
+</svg>
+</div>
+
+<h3>Understanding &lambda; = &sigma;<sup>2</sup><sub>n</sub> &middot; <span class="var">L</span></h3>
+
+<p>The regularization parameter &lambda; controls the bias-variance tradeoff. The optimal value from MMSE theory is:</p>
+
+<div class="math-block">
+  &lambda; = &sigma;<sup>2</sup><sub>n</sub> &middot; <span class="var">L</span> = <span class="var">L</span> / SNR<sub>linear</sub>
+  <span class="label">(D.6)</span>
+</div>
+
+<p>where &sigma;<sup>2</sup><sub>n</sub> is the noise variance per subcarrier. The factor <span class="var">L</span> appears because
+<span class="mat">F</span><sub>p</sub><sup>H</sup> <span class="mat">F</span><sub>p</sub> has eigenvalues proportional to <span class="var">N<sub>p</sub></span>, so we need &lambda; to be on the
+same scale as the noise energy projected into the time domain. Intuitively:</p>
+
+<ul style="margin-left: 30px;">
+  <li><strong>High SNR</strong> (&sigma;<sup>2</sup> small): &lambda; &rarr; 0, solution approaches unregularized LS (trust the data)</li>
+  <li><strong>Low SNR</strong> (&sigma;<sup>2</sup> large): &lambda; &rarr; large, solution shrinks toward zero (trust the prior that <span class="vec">h</span> is small)</li>
+  <li>Each eigenvalue &sigma;<sub><span class="var">i</span></sub> of <span class="mat">F</span><sub>p</sub><sup>H</sup><span class="mat">F</span><sub>p</sub> gets a shrinkage factor of &sigma;<sub><span class="var">i</span></sub> / (&sigma;<sub><span class="var">i</span></sub> + &lambda;), damping directions with weak signal-to-noise</li>
+</ul>
+
+<h3>Complete DFT-LMMSE Pipeline (Expanded)</h3>
+
+<div class="math-block" style="text-align: left; padding: 20px 30px; line-height: 2.2;">
+  <strong>Given:</strong> received signal <span class="vec">Y</span>, known pilots <span class="vec">X</span><sub>p</sub>, pilot indices {<span class="var">p<sub>m</sub></span>}, noise variance &sigma;<sup>2</sup><sub>n</sub>, max delay <span class="var">L</span><br>
+  <br>
+  <span style="color:var(--blue);">1.</span> &nbsp; <span class="vec">H&#770;</span><sub>LS</sub>[<span class="var">m</span>] = <span class="var">Y</span>[<span class="var">p<sub>m</sub></span>] / <span class="var">X</span><sub>p</sub>[<span class="var">m</span>] &nbsp;&nbsp;&nbsp; <span class="var">m</span> = 0, ..., <span class="var">N<sub>p</sub></span>&minus;1 &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; LS at pilots</span><br>
+  <span style="color:var(--blue);">2.</span> &nbsp; [<span class="mat">F</span><sub>p</sub>]<sub><span class="var">m</span>,<span class="var">l</span></sub> = exp(&minus;j 2&pi; <span class="var">p<sub>m</sub> l</span> / <span class="var">N</span>) &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; build partial DFT</span><br>
+  <span style="color:var(--blue);">3.</span> &nbsp; <span class="mat">A</span> = <span class="mat">F</span><sub>p</sub><sup>H</sup> <span class="mat">F</span><sub>p</sub> + &sigma;<sup>2</sup><sub>n</sub> <span class="var">L</span> &middot; <span class="mat">I</span><sub><span class="var">L</span></sub> &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; Gram + regularization (<span class="var">L</span>&times;<span class="var">L</span>)</span><br>
+  <span style="color:var(--blue);">4.</span> &nbsp; <span class="vec">h&#770;</span> = <span class="mat">A</span><sup>&minus;1</sup> <span class="mat">F</span><sub>p</sub><sup>H</sup> <span class="vec">H&#770;</span><sub>LS</sub> &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; solve for CIR (<span class="var">L</span>&times;1)</span><br>
+  <span style="color:var(--blue);">5.</span> &nbsp; [<span class="mat">F</span><sub>full</sub>]<sub><span class="var">k</span>,<span class="var">l</span></sub> = exp(&minus;j 2&pi; <span class="var">kl</span> / <span class="var">N</span>) &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; full DFT (<span class="var">N</span>&times;<span class="var">L</span>)</span><br>
+  <span style="color:var(--blue);">6.</span> &nbsp; <span class="vec">H&#770;</span> = <span class="mat">F</span><sub>full</sub> &middot; <span class="vec">h&#770;</span> &nbsp;&nbsp; <span style="color:var(--overlay); font-size:0.85em;">&larr; reconstruct at all <span class="var">N</span> subcarriers</span><br>
+</div>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION E: ZF vs MMSE EQUALIZATION -->
+<!-- ===================================================================== -->
+<h1 id="secE">E. Zero-Forcing vs MMSE Equalization</h1>
+
+<p>After estimating the channel <span class="vec">H&#770;</span>, we must <em>equalize</em> &mdash; undo the channel distortion to recover the transmitted symbols. Two common approaches have dramatically different noise behavior.</p>
+
+<h3>Signal Model at Each Subcarrier</h3>
+
+<div class="math-block">
+  <span class="var">Y</span>[<span class="var">k</span>] = <span class="var">H</span>[<span class="var">k</span>] &middot; <span class="var">X</span>[<span class="var">k</span>] + <span class="var">W</span>[<span class="var">k</span>]
+  <span class="label">(E.1)</span>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card" style="border-color: var(--red);">
+    <h4 style="color: var(--red);">Zero-Forcing (ZF) Equalizer</h4>
+
+    <div class="math-block" style="border-color: var(--red);">
+      <span class="var">X&#770;</span><sub>ZF</sub>[<span class="var">k</span>] = <span class="var">Y</span>[<span class="var">k</span>] / <span class="var">H&#770;</span>[<span class="var">k</span>]
+      <span class="label">(E.2)</span>
+    </div>
+
+    <p>Expanding with the signal model:</p>
+
+    <div class="math-block" style="border-color: var(--red); font-size: 1.0em;">
+      <span class="var">X&#770;</span><sub>ZF</sub>[<span class="var">k</span>] = <span class="var">X</span>[<span class="var">k</span>] + <span class="var">W</span>[<span class="var">k</span>] / <span class="var">H</span>[<span class="var">k</span>]
+      <span class="label">(E.3)</span>
+    </div>
+
+    <p><strong>Effective noise after ZF:</strong></p>
+
+    <div class="math-block" style="border-color: var(--red); font-size: 1.0em;">
+      &sigma;<sup>2</sup><sub>ZF</sub>[<span class="var">k</span>] = &sigma;<sup>2</sup><sub>n</sub> / |<span class="var">H</span>[<span class="var">k</span>]|<sup>2</sup>
+      <span class="label">(E.4)</span>
+    </div>
+
+    <div class="highlight-red">
+      <strong>Problem:</strong> When |<span class="var">H</span>[<span class="var">k</span>]| &rarr; 0 (deep fade / null), the noise is amplified to infinity: &sigma;<sup>2</sup><sub>ZF</sub> &rarr; &infin;. Even one subcarrier with a near-null channel response can destroy the entire codeword.
+    </div>
+  </div>
+
+  <div class="compare-card" style="border-color: var(--green);">
+    <h4 style="color: var(--green);">MMSE Equalizer</h4>
+
+    <div class="math-block" style="border-color: var(--green);">
+      <span class="var">X&#770;</span><sub>MMSE</sub>[<span class="var">k</span>] = <span class="var">H&#770;</span>*[<span class="var">k</span>] &middot; <span class="var">Y</span>[<span class="var">k</span>] / (|<span class="var">H&#770;</span>[<span class="var">k</span>]|<sup>2</sup> + &sigma;<sup>2</sup><sub>n</sub>)
+      <span class="label">(E.5)</span>
+    </div>
+
+    <p>Expanding (where * denotes complex conjugate):</p>
+
+    <div class="math-block" style="border-color: var(--green); font-size: 1.0em;">
+      <span class="var">X&#770;</span><sub>MMSE</sub>[<span class="var">k</span>] = <span class="var">G</span>[<span class="var">k</span>] &middot; <span class="var">X</span>[<span class="var">k</span>] + <span class="var">G</span>[<span class="var">k</span>] &middot; <span class="var">W</span>[<span class="var">k</span>] / <span class="var">H</span>[<span class="var">k</span>]
+      <span class="label">(E.6)</span>
+    </div>
+
+    <p><strong>Effective noise after MMSE:</strong></p>
+
+    <div class="math-block" style="border-color: var(--green); font-size: 1.0em;">
+      &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>] = &sigma;<sup>2</sup><sub>n</sub> / (|<span class="var">H</span>[<span class="var">k</span>]|<sup>2</sup> + &sigma;<sup>2</sup><sub>n</sub>)
+      <span class="label">(E.7)</span>
+    </div>
+
+    <div class="highlight-green">
+      <strong>Bounded noise:</strong> As |<span class="var">H</span>[<span class="var">k</span>]| &rarr; 0, &sigma;<sup>2</sup><sub>eff</sub> &rarr; &sigma;<sup>2</sup><sub>n</sub>/&sigma;<sup>2</sup><sub>n</sub> = 1 (finite!). The MMSE equalizer "gives up" on deeply faded subcarriers rather than amplifying noise to infinity.
+    </div>
+  </div>
+</div>
+
+<h3>Noise Amplification Comparison</h3>
+
+<div class="diagram" style="overflow-x:auto;">
+<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" style="max-width:800px; width:100%;">
+  <rect x="0" y="0" width="800" height="300" fill="#181825" rx="8"/>
+
+  <text x="400" y="22" text-anchor="middle" font-size="13" fill="#cdd6f4" font-family="Segoe UI, sans-serif" font-weight="bold">Noise Power After Equalization vs |H[k]|&sup2;</text>
+
+  <!-- Axes -->
+  <line x1="80" y1="260" x2="750" y2="260" stroke="#6c7086" stroke-width="1"/>
+  <line x1="80" y1="40" x2="80" y2="260" stroke="#6c7086" stroke-width="1"/>
+  <text x="415" y="290" text-anchor="middle" font-size="11" fill="#a6adc8" font-family="Segoe UI, sans-serif">|H[k]|&sup2; (channel power at subcarrier k)</text>
+  <text x="25" y="150" text-anchor="middle" font-size="11" fill="#a6adc8" font-family="Segoe UI, sans-serif" transform="rotate(-90, 25, 150)">Effective noise &sigma;&sup2;_eff[k]</text>
+
+  <!-- Y-axis labels -->
+  <text x="72" y="265" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="end">0</text>
+  <text x="72" y="215" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="end">1</text>
+  <text x="72" y="165" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="end">5</text>
+  <text x="72" y="115" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="end">20</text>
+  <text x="72" y="65" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="end">100</text>
+  <text x="72" y="45" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif" text-anchor="end">&infin;</text>
+
+  <!-- X-axis labels -->
+  <text x="80" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">0</text>
+  <text x="180" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">0.05</text>
+  <text x="300" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">0.2</text>
+  <text x="450" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">0.5</text>
+  <text x="600" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">1.0</text>
+  <text x="750" y="278" font-size="9" fill="#6c7086" font-family="Segoe UI, sans-serif" text-anchor="middle">2.0</text>
+
+  <!-- Grid lines -->
+  <line x1="80" y1="215" x2="750" y2="215" stroke="#313244" stroke-width="0.5" stroke-dasharray="3"/>
+  <line x1="80" y1="165" x2="750" y2="165" stroke="#313244" stroke-width="0.5" stroke-dasharray="3"/>
+  <line x1="80" y1="115" x2="750" y2="115" stroke="#313244" stroke-width="0.5" stroke-dasharray="3"/>
+
+  <!-- ZF curve: sigma^2 / |H|^2 -> shoots up as |H|->0 -->
+  <polyline points="80,40 100,52 130,75 180,115 230,145 300,175 380,200 450,215 530,228 600,237 680,243 750,248" fill="none" stroke="#f38ba8" stroke-width="2.5"/>
+  <text x="110" y="48" font-size="11" fill="#f38ba8" font-family="Segoe UI, sans-serif" font-weight="bold">ZF: &sigma;&sup2;/|H|&sup2; &rarr; &infin;</text>
+
+  <!-- MMSE curve: sigma^2 / (|H|^2 + sigma^2) -> bounded -->
+  <polyline points="80,215 130,218 180,222 230,228 300,233 380,240 450,245 530,249 600,252 680,254 750,256" fill="none" stroke="#a6e3a1" stroke-width="2.5"/>
+  <text x="180" y="240" font-size="11" fill="#a6e3a1" font-family="Segoe UI, sans-serif" font-weight="bold">MMSE: &sigma;&sup2;/(|H|&sup2;+&sigma;&sup2;) &le; 1</text>
+
+  <!-- Danger zone annotation -->
+  <rect x="82" y="42" width="80" height="125" fill="#f38ba8" opacity="0.05" rx="4"/>
+  <text x="122" y="178" text-anchor="middle" font-size="9" fill="#f38ba8" font-family="Segoe UI, sans-serif">DANGER</text>
+  <text x="122" y="189" text-anchor="middle" font-size="8" fill="#f38ba8" font-family="Segoe UI, sans-serif">deep fade</text>
+
+  <!-- sigma^2 reference line -->
+  <line x1="80" y1="215" x2="750" y2="215" stroke="#f9e2af" stroke-width="1" stroke-dasharray="6,3" opacity="0.4"/>
+  <text x="755" y="212" font-size="9" fill="#f9e2af" font-family="Segoe UI, sans-serif">&sigma;&sup2;</text>
+</svg>
+</div>
+
+<h3>Why MMSE Matters for LDPC</h3>
+
+<p>LDPC decoders are iterative message-passing algorithms that rely on the statistical independence of errors across bits.
+When ZF equalization amplifies noise at faded subcarriers, it creates <em>correlated burst errors</em> &mdash; many bits from the same
+subcarrier are corrupted simultaneously. The LDPC decoder's belief propagation assumes independent noise and cannot handle
+these bursts efficiently. MMSE equalization keeps the noise bounded and approximately independent across subcarriers,
+allowing the LDPC decoder to converge reliably.</p>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION F: PER-SUBCARRIER NOISE -> LLR -->
+<!-- ===================================================================== -->
+<h1 id="secF">F. Per-Subcarrier Noise &rarr; LLR Soft Demapping</h1>
+
+<h3>Effective Noise Variance per Subcarrier</h3>
+
+<p>After MMSE equalization, each subcarrier <span class="var">k</span> has a different effective noise variance that depends on the channel gain at that frequency:</p>
+
+<div class="math-block">
+  &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>] = &sigma;<sup>2</sup><sub>n</sub> / (|<span class="var">H&#770;</span>[<span class="var">k</span>]|<sup>2</sup> + &sigma;<sup>2</sup><sub>n</sub>)
+  <span class="label">(F.1)</span>
+</div>
+
+<p>This is the noise variance seen by the soft demapper <em>after</em> equalization. Subcarriers with strong channel response (|<span class="var">H</span>| large) have small effective noise, while faded subcarriers (|<span class="var">H</span>| small) have effective noise approaching 1.</p>
+
+<h3>Log-Likelihood Ratio (LLR) with Per-Subcarrier Noise</h3>
+
+<p>For a QPSK-modulated bit <span class="var">b</span> carried on subcarrier <span class="var">k</span>, the soft-output LLR is:</p>
+
+<div class="math-block" style="border-color: var(--green);">
+  LLR(<span class="var">b</span>) = log &nbsp; P(<span class="var">b</span>=0 | <span class="var">X&#770;</span>[<span class="var">k</span>]) / P(<span class="var">b</span>=1 | <span class="var">X&#770;</span>[<span class="var">k</span>])
+  <span class="label">(F.2)</span>
+</div>
+
+<p>For QPSK with Gray mapping, the LLR for the real (I) bit simplifies to:</p>
+
+<div class="math-block" style="border-color: var(--green);">
+  LLR<sub>I</sub> = 2 &middot; Re(<span class="var">X&#770;</span>[<span class="var">k</span>]) / &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>]
+  <span class="label">(F.3)</span>
+</div>
+
+<p>and for the quadrature (Q) bit:</p>
+
+<div class="math-block" style="border-color: var(--green);">
+  LLR<sub>Q</sub> = 2 &middot; Im(<span class="var">X&#770;</span>[<span class="var">k</span>]) / &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>]
+  <span class="label">(F.4)</span>
+</div>
+
+<h3>For Higher-Order QAM (16-QAM, 64-QAM)</h3>
+
+<p>The exact max-log LLR for bit <span class="var">b<sub>i</sub></span> of a QAM symbol on subcarrier <span class="var">k</span> is:</p>
+
+<div class="math-block">
+  LLR(<span class="var">b<sub>i</sub></span>) = (1 / &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>]) &middot; (
+  min<sub><span class="var">s</span> &isin; S<sub><span class="var">b<sub>i</sub></span>=0</sub></sub> |<span class="var">X&#770;</span>[<span class="var">k</span>] &minus; <span class="var">s</span>|<sup>2</sup>
+  &minus; min<sub><span class="var">s</span> &isin; S<sub><span class="var">b<sub>i</sub></span>=1</sub></sub> |<span class="var">X&#770;</span>[<span class="var">k</span>] &minus; <span class="var">s</span>|<sup>2</sup> )
+  <span class="label">(F.5)</span>
+</div>
+
+<p>where S<sub><span class="var">b<sub>i</sub></span>=0</sub> and S<sub><span class="var">b<sub>i</sub></span>=1</sub> are the subsets of the QAM constellation where the <span class="var">i</span>-th bit is 0 or 1, respectively.</p>
+
+<h3>Why Per-Subcarrier Noise Matters for LDPC</h3>
+
+<div class="highlight-green">
+  <strong>Truthful confidence per bit:</strong> The key insight is that &sigma;<sup>2</sup><sub>eff</sub>[<span class="var">k</span>] appears in the
+  <em>denominator</em> of every LLR formula. This means:
+  <ul style="margin-left: 20px; margin-top: 8px;">
+    <li><strong>Strong channel (large |H|):</strong> small &sigma;<sup>2</sup><sub>eff</sub> &rarr; large |LLR| &rarr; decoder is told "this bit is very reliable"</li>
+    <li><strong>Weak channel (small |H|):</strong> large &sigma;<sup>2</sup><sub>eff</sub> &rarr; small |LLR| &rarr; decoder is told "this bit is unreliable, don't trust it"</li>
+  </ul>
+  <p style="margin-top: 8px;">Without per-subcarrier noise (using a flat &sigma;<sup>2</sup> for all subcarriers), the LDPC decoder would over-trust
+  bits from faded subcarriers, leading to decoder failure. With truthful per-subcarrier LLRs, the decoder can
+  use its redundancy to correct the unreliable bits by relying on the reliable ones.</p>
+</div>
+
+<div class="diagram"><pre>
+  Subcarrier:    [k=0]     [k=1]     [k=2]     [k=3]     [k=4]     ...
+  |H[k]|:        1.5       0.02      1.2       0.8       1.4       ...
+  &sigma;&sup2;_eff:       0.031     0.962     0.041     0.072     0.034     ...
+  |LLR|:         LARGE     ~zero     LARGE     medium    LARGE     ...
+
+  LDPC decoder:  "trust"   "ignore"  "trust"   "okay"    "trust"   ...
+                           &uarr;
+                    Deep fade &mdash; MMSE keeps noise bounded,
+                    LLR tells decoder this bit is unreliable
+</pre></div>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION G: CHANNEL MODEL COMPARISON -->
+<!-- ===================================================================== -->
+<h1 id="secG">G. Channel Model Comparison</h1>
+
+<h3>Channel Profiles Used in the System</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Channel</th>
+      <th>Taps</th>
+      <th>Max Delay (samples)</th>
+      <th>Fading Type</th>
+      <th>Purpose / Origin</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="color:var(--green);">Flat (AWGN)</td>
+      <td>1</td>
+      <td>0</td>
+      <td>None (constant)</td>
+      <td>Baseline; no multipath, pure noise test</td>
+    </tr>
+    <tr>
+      <td style="color:var(--blue);">Two-tap</td>
+      <td>2</td>
+      <td>1</td>
+      <td>Fixed</td>
+      <td>Simplest frequency-selective channel; tests basic equalization</td>
+    </tr>
+    <tr>
+      <td style="color:var(--yellow);">TU-6</td>
+      <td>6</td>
+      <td>~30</td>
+      <td>Rayleigh</td>
+      <td>COST207 Typical Urban; DVB-T/T2 reference; dense multipath</td>
+    </tr>
+    <tr>
+      <td style="color:var(--peach);">COST207-HT</td>
+      <td>6</td>
+      <td>~15</td>
+      <td>Rayleigh</td>
+      <td>COST207 Hilly Terrain; moderate delay spread</td>
+    </tr>
+    <tr>
+      <td style="color:var(--mauve);">Brazil-A</td>
+      <td>6</td>
+      <td>~3</td>
+      <td>Rician (LOS)</td>
+      <td>Brazilian DTV; rooftop reception with line-of-sight</td>
+    </tr>
+    <tr>
+      <td style="color:var(--teal);">Brazil-D</td>
+      <td>6</td>
+      <td>~25</td>
+      <td>Rayleigh</td>
+      <td>Brazilian DTV; dense urban NLOS with severe multipath</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>COST207 TU-6 Power Delay Profile</h3>
+
+<p>The TU-6 (Typical Urban, 6-tap) channel from the COST 207 report models a typical urban radio propagation environment. It consists of 6 discrete taps with specified delays and average powers:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Tap</th>
+      <th>Delay (&mu;s)</th>
+      <th>Delay (samples, N=64)</th>
+      <th>Power (dB)</th>
+      <th>Linear Power</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td>0.0</td><td>0</td><td>&minus;3.0</td><td>0.50</td></tr>
+    <tr><td>1</td><td>0.2</td><td>~3</td><td>0.0</td><td>1.00</td></tr>
+    <tr><td>2</td><td>0.5</td><td>~7</td><td>&minus;2.0</td><td>0.63</td></tr>
+    <tr><td>3</td><td>1.6</td><td>~15</td><td>&minus;6.0</td><td>0.25</td></tr>
+    <tr><td>4</td><td>2.3</td><td>~22</td><td>&minus;8.0</td><td>0.16</td></tr>
+    <tr><td>5</td><td>5.0</td><td>~30</td><td>&minus;10.0</td><td>0.10</td></tr>
+  </tbody>
+</table>
+
+<p>Each tap has its gain drawn independently from a Rayleigh distribution (zero-mean complex Gaussian) with the specified average power, then the overall profile is normalized to unit total power.</p>
+
+<h3>Rayleigh vs Rician Fading</h3>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--yellow);">Rayleigh Fading</h4>
+    <p>Used by: TU-6, COST207-HT, Brazil-D</p>
+    <div class="math-block" style="font-size: 1.0em;">
+      <span class="var">h<sub>l</sub></span> ~ CN(0, <span class="var">P<sub>l</sub></span>)
+    </div>
+    <p>No line-of-sight (LOS) component. The tap gain has zero mean, and its envelope follows a Rayleigh distribution.
+    Deep fades (|<span class="var">h<sub>l</sub></span>| &rarr; 0) occur with significant probability, making this the most
+    challenging fading model. The channel frequency response can have deep nulls at certain frequencies.</p>
+    <p><strong>PDF of envelope:</strong> <span class="var">f</span>(|<span class="var">h</span>|) = (2|<span class="var">h</span>|/&sigma;<sup>2</sup>) exp(&minus;|<span class="var">h</span>|<sup>2</sup>/&sigma;<sup>2</sup>)</p>
+  </div>
+
+  <div class="compare-card">
+    <h4 style="color: var(--mauve);">Rician Fading</h4>
+    <p>Used by: Brazil-A (LOS path)</p>
+    <div class="math-block" style="font-size: 1.0em;">
+      <span class="var">h<sub>l</sub></span> ~ CN(<span class="var">&mu;<sub>l</sub></span>, <span class="var">P<sub>l</sub></span>)
+    </div>
+    <p>Has a dominant line-of-sight (LOS) component (<span class="var">&mu;</span> &ne; 0) plus scattered multipath. The
+    <span class="var">K</span>-factor = |<span class="var">&mu;</span>|<sup>2</sup>/<span class="var">P</span> measures LOS strength relative to scatter.
+    Higher <span class="var">K</span> means less severe fading &mdash; the channel never fades below the LOS level.
+    When <span class="var">K</span>=0, Rician reduces to Rayleigh.</p>
+    <p><strong>PDF of envelope:</strong> <span class="var">f</span>(|<span class="var">h</span>|) = (2|<span class="var">h</span>|/&sigma;<sup>2</sup>) exp(&minus;(|<span class="var">h</span>|<sup>2</sup>+|&mu;|<sup>2</sup>)/&sigma;<sup>2</sup>) &middot; I<sub>0</sub>(2|<span class="var">h</span>||&mu;|/&sigma;<sup>2</sup>)</p>
+  </div>
+</div>
+
+<h3>Brazil DTV Channel Profiles</h3>
+
+<p>The Brazilian DTV channel models (defined by SET/ABERT) characterize reception conditions specific to Brazilian geography and urban environments:</p>
+
+<ul style="margin-left: 30px;">
+  <li><strong>Brazil-A:</strong> Rooftop reception with clear line-of-sight. Rician fading with strong <span class="var">K</span>-factor. Represents the best-case scenario in Brazilian broadcasting. Short delay spread (~3 samples).</li>
+  <li><strong>Brazil-D:</strong> Indoor portable reception in dense urban areas. Pure Rayleigh fading with severe multipath. Large delay spread (~25 samples). Similar in difficulty to TU-6 and represents worst-case Brazilian reception.</li>
+</ul>
+
+<p>These profiles are used in ISDB-Tb (Brazilian digital TV standard) conformance testing and are relevant to ATSC 3.0 since both operate in similar UHF frequency bands in urban environments.</p>
+
+
+<!-- ===================================================================== -->
+<!-- SECTION H: SYSTEM PERFORMANCE SUMMARY -->
+<!-- ===================================================================== -->
+<h1 id="secH">H. System Performance Summary</h1>
+
+<h3>BER Results: LMMSE + MMSE (New System)</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Channel</th>
+      <th>FFT=64 @ 15 dB</th>
+      <th>FFT=256 @ 15 dB</th>
+      <th>FFT=8192 @ 10 dB</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="color:var(--green);">Flat (AWGN)</td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td style="color:var(--overlay);">&mdash;</td>
+    </tr>
+    <tr>
+      <td style="color:var(--blue);">Two-tap</td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td style="color:var(--overlay);">&mdash;</td>
+    </tr>
+    <tr>
+      <td style="color:var(--yellow);">TU-6</td>
+      <td><span class="tag tag-warn">~0.08 (ISI)</span></td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td><span class="tag tag-pass">0.0000 (1 iter)</span></td>
+    </tr>
+    <tr>
+      <td style="color:var(--peach);">COST207-HT</td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td><span class="tag tag-pass">0.0000</span></td>
+      <td style="color:var(--overlay);">&mdash;</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>TU-6 Delay Spread vs Cyclic Prefix</h3>
+
+<div class="highlight">
+  <strong>Key insight &mdash; why TU-6 shows residual ISI at FFT=64:</strong>
+  <br><br>
+  The TU-6 channel has a maximum delay spread of approximately <strong>30 samples</strong>. The cyclic prefix (CP) for each FFT size is N/4:
+  <br><br>
+  <table style="width: auto; margin: 10px 0;">
+    <thead>
+      <tr><th>FFT Size</th><th>CP Length</th><th>TU-6 Delay</th><th>CP &ge; Delay?</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>64</td>
+        <td style="color:var(--red);">16</td>
+        <td>~30</td>
+        <td><span class="tag tag-fail">NO &mdash; ISI!</span></td>
+      </tr>
+      <tr>
+        <td>256</td>
+        <td style="color:var(--green);">64</td>
+        <td>~30</td>
+        <td><span class="tag tag-pass">YES</span></td>
+      </tr>
+      <tr>
+        <td>8192</td>
+        <td style="color:var(--green);">2048</td>
+        <td>~30</td>
+        <td><span class="tag tag-pass">YES (massive margin)</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <br>
+  When the CP is shorter than the channel delay spread, multipath components from the previous OFDM symbol
+  leak into the current symbol, causing <strong>inter-symbol interference (ISI)</strong> that cannot be removed
+  by any equalization technique. This is a fundamental OFDM limitation, not an estimator failure.
+  Increasing FFT size (and thus CP) fully absorbs the delay spread.
+</div>
+
+<h3>Legacy LS+ZF vs New LMMSE+MMSE @ 15 dB</h3>
+
+<div class="compare-grid">
+  <div class="compare-card" style="border-color: var(--red);">
+    <h4 style="color: var(--red);">Legacy: LS + ZF (broken)</h4>
+    <table>
+      <tbody>
+        <tr><td>Flat</td><td><span class="tag tag-pass">0.0000</span></td></tr>
+        <tr><td style="color:var(--blue);">Two-tap</td><td><span class="tag tag-fail">BER = 0.19</span></td></tr>
+        <tr><td style="color:var(--yellow);">TU-6</td><td><span class="tag tag-fail">BER = 0.34</span></td></tr>
+        <tr><td style="color:var(--peach);">COST207-HT</td><td><span class="tag tag-fail">Severely degraded</span></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:10px; color:var(--red);">LS estimation with only 4 pilots cannot track the channel.
+    ZF equalization amplifies noise at faded subcarriers. The LDPC decoder receives corrupted LLRs and cannot converge.</p>
+  </div>
+
+  <div class="compare-card" style="border-color: var(--green);">
+    <h4 style="color: var(--green);">New: DFT-LMMSE + MMSE</h4>
+    <table>
+      <tbody>
+        <tr><td>Flat</td><td><span class="tag tag-pass">0.0000</span></td></tr>
+        <tr><td style="color:var(--blue);">Two-tap</td><td><span class="tag tag-pass">BER = 0.0000</span></td></tr>
+        <tr><td style="color:var(--yellow);">TU-6 (FFT&ge;256)</td><td><span class="tag tag-pass">BER = 0.0000</span></td></tr>
+        <tr><td style="color:var(--peach);">COST207-HT</td><td><span class="tag tag-pass">BER = 0.0000</span></td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:10px; color:var(--green);">13 pilots with DFT-LMMSE provide accurate channel estimates even under severe multipath. MMSE equalization bounds noise. Per-subcarrier LLRs give the LDPC decoder truthful soft information.</p>
+  </div>
+</div>
+
+<h3>What Changed: The Three-Part Fix</h3>
+
+<div class="diagram"><pre>
+  LEGACY (broken)                          NEW (working)
+  ─────────────────                        ─────────────────
+  4 pilots, linear interp                  13 pilots every 4th subcarrier
+      &darr;                                       &darr;
+  LS: H&#770; = Y/X  (noisy, sparse)             DFT-LMMSE: regularized time-domain
+      &darr;                                       estimate, then full DFT recon
+  ZF: X&#770; = Y/H  (noise blow-up)                  &darr;
+      &darr;                                   MMSE: X&#770; = H*Y/(|H|&sup2;+&sigma;&sup2;) (bounded)
+  Flat &sigma;&sup2; for all subs                          &darr;
+      &darr;                                   Per-subcarrier &sigma;&sup2;_eff[k]
+  LLR = 2&middot;Re(X&#770;)/&sigma;&sup2;  (wrong &sigma;&sup2;)              &darr;
+      &darr;                                   LLR = 2&middot;Re(X&#770;)/&sigma;&sup2;_eff[k]  (truthful)
+  LDPC gets garbage &rarr; BER = 0.34              &darr;
+                                           LDPC gets truth &rarr; BER = 0.0000
+</pre></div>
+
+<div style="text-align:center; margin: 40px 0; padding: 20px; border-top: 1px solid var(--border);">
+  <p style="color: var(--overlay); font-size: 0.9em;">
+    OFDM Channel Estimation Mathematical Reference &mdash; March 2026
+    <br>
+    Part of the ATSC 3.0 LDPC / OFDM simulation system
+  </p>
+</div>
+
+</body>
+</html>

@@ -6,6 +6,7 @@ export default function Home() {
     { num: 4, title: 'Over-the-Air Loopback', status: 'Complete', desc: 'SDR hardware TX/RX, AES-256 encryption, ICD document' },
     { num: 5, title: 'Integration Dashboard', status: 'Active', desc: 'Next.js dashboard, documentation, blog series' },
     { num: 6, title: 'Signal Recognition & Imagery', status: 'Active', desc: 'ML-based AMR, satellite imagery decoding, AI signal monitor' },
+    { num: 7, title: 'OFDM Transceiver Simulator', status: 'Active', desc: 'ATSC 3.0 LDPC decoder — Python reference, Rust SIMD, FPGA RTL (44 modules, 31 testbenches)' },
   ]
 
   return (
