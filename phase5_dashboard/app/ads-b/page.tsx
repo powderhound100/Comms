@@ -332,15 +332,46 @@ export default function ADSBPage() {
       <div className="grid grid-cols-2 gap-3 mb-6">
         {[
           { slot: 0, label: '1090 MHz Gain', mode: 'adsb_1090', color: 'cyan', defaultGain: 50 },
-          { slot: 1, label: '978 MHz Gain', mode: 'adsb_978', color: 'orange', defaultGain: 100 },
+          { slot: 1, label: '978 MHz Gain', mode: 'adsb_978', color: 'orange', defaultGain: 50 },
         ].map(sdr => {
           const slots = piHealth?.slots ?? {}
           const slotData = (slots as Record<string, any>)[String(sdr.slot)]
           const currentGain = slotData?.config?.gain ?? sdr.defaultGain
+          const piOnline = !!piHealth
+          const slotRunning = slotData?.status === 'running'
+          const sendGain = async (newGain: number) => {
+            const indicator = document.getElementById(`gain-status-${sdr.slot}`)
+            if (!indicator) return
+            indicator.textContent = 'Sending...'
+            indicator.className = 'text-[9px] font-mono text-yellow-400 ml-2 transition-opacity'
+            try {
+              const res = await fetch(`/api/pi/sdr/${sdr.slot}/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
+              })
+              if (res.ok) {
+                indicator.textContent = 'Applied'
+                indicator.className = 'text-[9px] font-mono text-green-400 ml-2 transition-opacity'
+              } else {
+                indicator.textContent = 'Failed'
+                indicator.className = 'text-[9px] font-mono text-red-400 ml-2 transition-opacity'
+              }
+            } catch {
+              indicator.textContent = 'Pi unreachable'
+              indicator.className = 'text-[9px] font-mono text-red-400 ml-2 transition-opacity'
+            }
+            setTimeout(() => { indicator.textContent = '' }, 3000)
+          }
           return (
-            <div key={sdr.slot} className="bg-gray-900 rounded-lg p-3 border border-gray-800">
+            <div key={sdr.slot} className={`bg-gray-900 rounded-lg p-3 border ${piOnline ? 'border-gray-800' : 'border-red-900/50'}`}>
               <div className="flex items-center justify-between mb-2">
-                <span className={`text-xs font-semibold uppercase tracking-wider ${sdr.color === 'cyan' ? 'text-cyan-400' : 'text-orange-400'}`}>{sdr.label}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-xs font-semibold uppercase tracking-wider ${sdr.color === 'cyan' ? 'text-cyan-400' : 'text-orange-400'}`}>{sdr.label}</span>
+                  {!piOnline && <span className="text-[9px] text-red-400 font-mono">Pi offline</span>}
+                  {piOnline && !slotRunning && <span className="text-[9px] text-gray-500 font-mono">stopped</span>}
+                  <span id={`gain-status-${sdr.slot}`} className="text-[9px] font-mono ml-2"></span>
+                </div>
                 <span className={`text-xs font-mono ${sdr.color === 'cyan' ? 'text-cyan-400' : 'text-orange-400'}`}
                   id={`gain-label-${sdr.slot}`}
                 >{(currentGain / 10).toFixed(1)} dB</span>
@@ -348,29 +379,17 @@ export default function ADSBPage() {
               <input
                 type="range"
                 min="0" max="496" step="10"
+                key={`${sdr.slot}-${currentGain}`}
                 defaultValue={currentGain}
-                className={`w-full h-2 bg-gray-800 rounded-full appearance-none cursor-pointer ${sdr.color === 'cyan' ? 'accent-cyan-500' : 'accent-orange-500'}`}
+                disabled={!piOnline}
+                className={`w-full h-2 bg-gray-800 rounded-full appearance-none ${piOnline ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'} ${sdr.color === 'cyan' ? 'accent-cyan-500' : 'accent-orange-500'}`}
                 onInput={(e) => {
                   const val = parseInt((e.target as HTMLInputElement).value)
                   const label = document.getElementById(`gain-label-${sdr.slot}`)
                   if (label) label.textContent = `${(val / 10).toFixed(1)} dB`
                 }}
-                onMouseUp={(e) => {
-                  const newGain = parseInt((e.target as HTMLInputElement).value)
-                  fetch(`/api/pi/sdr/${sdr.slot}/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
-                  })
-                }}
-                onTouchEnd={(e) => {
-                  const newGain = parseInt((e.target as HTMLInputElement).value)
-                  fetch(`/api/pi/sdr/${sdr.slot}/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: sdr.mode, config: { gain: newGain } }),
-                  })
-                }}
+                onMouseUp={(e) => sendGain(parseInt((e.target as HTMLInputElement).value))}
+                onTouchEnd={(e) => sendGain(parseInt((e.target as HTMLInputElement).value))}
               />
               <div className="flex justify-between text-[9px] text-gray-600 mt-1 font-mono">
                 <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>49.6</span>
@@ -591,23 +610,37 @@ export default function ADSBPage() {
                     <input
                       type="range"
                       min="0" max="496" step="10"
-                      defaultValue={slot.config?.gain ?? 100}
+                      key={`pi-slot-${slot.id}-${slot.config?.gain ?? 50}`}
+                      defaultValue={slot.config?.gain ?? 50}
                       className="w-24 h-1.5 bg-gray-800 rounded-full appearance-none cursor-pointer accent-cyan-500"
-                      onMouseUp={(e) => {
+                      onMouseUp={async (e) => {
                         const newGain = parseInt((e.target as HTMLInputElement).value)
-                        fetch(`/api/pi/sdr/${slot.id}/start`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
-                        })
+                        const label = document.getElementById(`pi-gain-status-${slot.id}`)
+                        if (label) { label.textContent = '...'; label.className = 'text-[9px] font-mono text-yellow-400 w-14 text-right' }
+                        try {
+                          const res = await fetch(`/api/pi/sdr/${slot.id}/start`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
+                          })
+                          if (label) {
+                            label.textContent = res.ok ? 'OK' : 'Fail'
+                            label.className = `text-[9px] font-mono ${res.ok ? 'text-green-400' : 'text-red-400'} w-14 text-right`
+                            setTimeout(() => { label.textContent = '' }, 3000)
+                          }
+                        } catch {
+                          if (label) { label.textContent = 'Error'; label.className = 'text-[9px] font-mono text-red-400 w-14 text-right'; setTimeout(() => { label.textContent = '' }, 3000) }
+                        }
                       }}
-                      onTouchEnd={(e) => {
+                      onTouchEnd={async (e) => {
                         const newGain = parseInt((e.target as HTMLInputElement).value)
-                        fetch(`/api/pi/sdr/${slot.id}/start`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
-                        })
+                        try {
+                          await fetch(`/api/pi/sdr/${slot.id}/start`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mode: slot.mode, config: { gain: newGain } }),
+                          })
+                        } catch { /* handled by next health poll */ }
                       }}
                     />
                     <span className="text-xs font-mono text-gray-400 w-12 text-right"
@@ -620,8 +653,9 @@ export default function ADSBPage() {
                         }
                       }}
                     >
-                      {((slot.config?.gain ?? 100) / 10).toFixed(1)}dB
+                      {((slot.config?.gain ?? 50) / 10).toFixed(1)}dB
                     </span>
+                    <span id={`pi-gain-status-${slot.id}`} className="text-[9px] font-mono w-14 text-right"></span>
                   </div>
                 )}
               </div>
