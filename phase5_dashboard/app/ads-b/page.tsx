@@ -331,7 +331,7 @@ export default function ADSBPage() {
       {/* SDR Gain Controls — 1090 MHz (Slot 0) + 978 MHz (Slot 1) */}
       <div className="grid grid-cols-2 gap-3 mb-6">
         {[
-          { slot: 0, label: '1090 MHz Gain', mode: 'adsb_1090', color: 'cyan', defaultGain: 100 },
+          { slot: 0, label: '1090 MHz Gain', mode: 'adsb_1090', color: 'cyan', defaultGain: 50 },
           { slot: 1, label: '978 MHz Gain', mode: 'adsb_978', color: 'orange', defaultGain: 100 },
         ].map(sdr => {
           const slots = piHealth?.slots ?? {}
