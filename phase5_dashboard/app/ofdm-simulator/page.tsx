@@ -565,16 +565,39 @@ make all
 
           {/* BER Charts */}
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">BER Charts</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {[1, 2, 3].map(n => (
+            <h2 className="text-sm font-semibold text-gray-300 mb-3">BER Charts — Modulation Comparison</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {['a1', 'a2'].map(n => (
                 <div key={n} className="bg-gray-800/50 rounded-lg p-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`/ofdm-report/ber_chart_${n}.svg`}
-                    alt={`BER chart ${n}`}
-                    className="w-full rounded"
-                  />
+                  <img src={`/ofdm-report/ber_chart_${n}.svg`} alt={`BER chart ${n}`} className="w-full rounded" />
+                </div>
+              ))}
+            </div>
+            <h2 className="text-sm font-semibold text-gray-300 mb-3 mt-6">BER Charts — Channel Comparison</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {['b1', 'b2', 'b3'].map(n => (
+                <div key={n} className="bg-gray-800/50 rounded-lg p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/ofdm-report/ber_chart_${n}.svg`} alt={`BER chart ${n}`} className="w-full rounded" />
+                </div>
+              ))}
+            </div>
+            <h2 className="text-sm font-semibold text-gray-300 mb-3 mt-6">BER Charts — Estimator Comparison</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {['c1', 'c2'].map(n => (
+                <div key={n} className="bg-gray-800/50 rounded-lg p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/ofdm-report/ber_chart_${n}.svg`} alt={`BER chart ${n}`} className="w-full rounded" />
+                </div>
+              ))}
+            </div>
+            <h2 className="text-sm font-semibold text-gray-300 mb-3 mt-6">BER Charts — Cross-Implementation</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {['d1', 'd2', 'd3'].map(n => (
+                <div key={n} className="bg-gray-800/50 rounded-lg p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`/ofdm-report/ber_chart_${n}.svg`} alt={`BER chart ${n}`} className="w-full rounded" />
                 </div>
               ))}
             </div>
