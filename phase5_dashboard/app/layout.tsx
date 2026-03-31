@@ -23,6 +23,7 @@ const navLinks = [
   { href: '/scan-detect', label: 'Scan & Detect' },
   { href: '/radio', label: 'Radio' },
   { href: '/ads-b', label: 'ADS-B' },
+  { href: '/ofdm-simulator', label: 'OFDM Simulator' },
   { href: '/references', label: 'References' },
 ]
 
