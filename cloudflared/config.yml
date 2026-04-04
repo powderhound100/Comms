@@ -4,6 +4,10 @@ credentials-file: /etc/cloudflared/credentials.json
 ingress:
   - hostname: groundlink.powderhound420.com
     service: http://groundlink-dashboard:3001
+  - hostname: fleet.powderhound420.com
+    service: http://groundlink-mqtt-bridge:8790
+  - hostname: fleet-api.powderhound420.com
+    service: http://groundlink-mqtt-bridge:8791
   - hostname: scanner.powderhound420.com
     service: http://host.docker.internal:8765
   - hostname: scanner-api.powderhound420.com

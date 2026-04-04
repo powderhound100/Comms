@@ -14,6 +14,7 @@ import {
 import SignalFlowDiagram from '@/components/SignalFlowDiagram'
 import SdrModeBar from '@/components/SdrModeBar'
 import { useSdr } from '@/hooks/use-sdr'
+import { useFleet } from '@/hooks/use-fleet'
 
 // ── Spectrum canvas hook (same pattern as radio page) ──
 
@@ -153,6 +154,10 @@ export default function ADSBPage() {
   const [testMode, setTestMode] = useState(false)
   const [gain, setGain] = useState(496)
 
+  // Fleet integration: merge aircraft from multiple ADS-B SDRs
+  const fleet = useFleet()
+  const [useFleetData, setUseFleetData] = useState(false)
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const trailsRef = useRef<Record<string, [number, number][]>>({})
@@ -285,8 +290,30 @@ export default function ADSBPage() {
     }
   }, [isMyMode])
 
+  // Merge fleet aircraft when fleet is connected
+  const displayAircraft = useFleetData && fleet.connected
+    ? [
+        ...aircraft,
+        // Add fleet aircraft not already in local feed (by ICAO)
+        ...fleet.aircraft
+          .filter(fa => !aircraft.some(a => a.icao_hex === fa.icao))
+          .map(fa => ({
+            icao_hex: fa.icao,
+            callsign: fa.callsign || null,
+            latitude: fa.lat ?? null,
+            longitude: fa.lon ?? null,
+            altitude_ft: fa.alt_ft ?? null,
+            ground_speed_kt: fa.gs_kt ?? null,
+            heading_deg: fa.hdg ?? null,
+            vertical_rate_fpm: fa.vr_fpm ?? null,
+            squawk: null,
+            on_ground: fa.on_ground ?? false,
+          })),
+      ]
+    : aircraft
+
   // Sort aircraft for table
-  const sortedAircraft = [...aircraft].sort((a, b) => {
+  const sortedAircraft = [...displayAircraft].sort((a, b) => {
     let av: string | number | null = null
     let bv: string | number | null = null
     switch (sortCol) {
@@ -358,6 +385,18 @@ export default function ADSBPage() {
             Test mode
           </span>
         </label>
+        {/* Fleet merge toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={useFleetData}
+            onChange={e => setUseFleetData(e.target.checked)}
+            className="rounded border-gray-600 bg-gray-800 text-cyan-500 focus:ring-cyan-500"
+          />
+          <span className={`text-sm ${useFleetData ? 'text-cyan-400' : 'text-gray-400'}`}>
+            Fleet merge {fleet.connected && <span className="text-[10px] text-emerald-400 ml-1">({fleet.aircraft.length} ac)</span>}
+          </span>
+        </label>
       </SdrModeBar>
 
       {/* Status + Stats */}
@@ -393,9 +432,9 @@ export default function ADSBPage() {
       <div className="bg-gray-900 rounded-xl border border-gray-800 mb-6 overflow-hidden">
         <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between">
           <span className="text-sm font-medium text-gray-300">Aircraft Map</span>
-          <span className="text-xs text-gray-500 font-mono">{aircraft.filter(a => a.latitude != null).length} with position</span>
+          <span className="text-xs text-gray-500 font-mono">{displayAircraft.filter(a => a.latitude != null).length} with position</span>
         </div>
-        <AircraftMap aircraft={aircraft} trails={trails} height={500} />
+        <AircraftMap aircraft={displayAircraft} trails={trails} height={500} />
       </div>
 
       {/* 1090 MHz Spectrum */}

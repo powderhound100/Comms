@@ -1,0 +1,12 @@
+# GROUNDLINK — RTL-SDR USB device permissions
+# Allows non-root access to all RTL2832U-based SDR dongles.
+#
+# Install: sudo cp rtl-sdr.rules /etc/udev/rules.d/99-rtl-sdr.rules
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# RTL2832U (RTL-SDR Blog V3/V4, generic RTL-SDR dongles)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0666"
+
+# NooElec NESDR
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666"

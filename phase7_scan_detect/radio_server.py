@@ -36,11 +36,19 @@ logger = logging.getLogger("radio")
 
 # Path to the C demodulator executable (same directory as this script)
 SCRIPT_DIR = Path(__file__).parent.resolve()
-RADIO_EXE = str(SCRIPT_DIR / "groundlink_radio.exe")
-DSD_FME_EXE = str(SCRIPT_DIR / "dsd-fme.exe")
 
-# RTL-SDR DLL directory — needed at runtime
-RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
+# Platform-aware binary names and library path
+IS_WINDOWS = sys.platform == "win32"
+EXE_SUFFIX = ".exe" if IS_WINDOWS else ""
+PATH_SEP = ";" if IS_WINDOWS else ":"
+RADIO_EXE = str(SCRIPT_DIR / f"groundlink_radio{EXE_SUFFIX}")
+DSD_FME_EXE = str(SCRIPT_DIR / f"dsd-fme{EXE_SUFFIX}")
+
+# RTL-SDR library directory (env-overridable for Pi deployment)
+RTLSDR_DIR = os.environ.get(
+    "RTLSDR_DIR",
+    r"D:\tools\rtl-sdr\x64" if IS_WINDOWS else "/usr/local/lib",
+)
 
 
 class RadioProcess:
@@ -52,17 +60,20 @@ class RadioProcess:
         self.freq_hz: int = int(94.9e6)
         self.mode: str = "wfm"
         self.gain: int = 400  # tenths of dB
+        self.device: int = 0  # RTL-SDR device index
 
     async def start(self):
         """Spawn the C demodulator process (and DSD-FME for P25)."""
         if self.proc is not None:
             await self.stop()
 
-        # Ensure rtlsdr.dll is findable
+        # Ensure rtlsdr library is findable
         env = os.environ.copy()
         path = env.get("PATH", "")
         if RTLSDR_DIR not in path:
-            env["PATH"] = RTLSDR_DIR + ";" + path
+            env["PATH"] = RTLSDR_DIR + PATH_SEP + path
+        if not IS_WINDOWS:
+            env["LD_LIBRARY_PATH"] = RTLSDR_DIR + ":" + env.get("LD_LIBRARY_PATH", "")
 
         # For P25 mode, use discriminator output from groundlink_radio
         radio_mode = "disc" if self.mode == "p25" else self.mode
@@ -72,6 +83,7 @@ class RadioProcess:
             "--freq", str(self.freq_hz),
             "--mode", radio_mode,
             "--gain", str(self.gain),
+            "--device", str(self.device),
         ]
         logger.info("Starting: %s", " ".join(cmd))
 
@@ -382,18 +394,23 @@ async def radio_handler(websocket, radio: RadioProcess):
 @click.option("--freq", default=94.9, help="Initial frequency (MHz)")
 @click.option("--mode", default="wfm", type=click.Choice(["wfm", "nfm", "am", "p25"]),
               help="Demod mode")
-def main(port, freq, mode):
+@click.option("--device", default=0, help="RTL-SDR device index")
+def main(port, freq, mode, device):
     """GROUNDLINK Radio — Live SDR audio receiver (C backend)."""
     import websockets
 
     radio = RadioProcess()
     radio.freq_hz = int(freq * 1e6)
     radio.mode = mode
+    radio.device = device
 
     # Verify the C executable exists
     if not os.path.isfile(RADIO_EXE):
         logger.error("C demodulator not found: %s", RADIO_EXE)
-        logger.error("Run build_radio.bat first to compile groundlink_radio.exe")
+        if IS_WINDOWS:
+            logger.error("Run build_radio.bat first to compile groundlink_radio.exe")
+        else:
+            logger.error("Run 'make groundlink_radio' or install the demodulator binary")
         sys.exit(1)
 
     async def serve():

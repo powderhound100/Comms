@@ -1,4 +1,31 @@
 services:
+  # ── MQTT Broker ──
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: groundlink-mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto-data:/mosquitto/data
+
+  # ── MQTT-to-WebSocket Bridge (aggregates multi-SDR data) ──
+  mqtt-bridge:
+    build:
+      context: ./mqtt_bridge
+    container_name: groundlink-mqtt-bridge
+    restart: unless-stopped
+    ports:
+      - "8790:8790"
+      - "8791:8791"
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+    depends_on:
+      - mosquitto
+
+  # ── Next.js Dashboard ──
   groundlink-dashboard:
     build:
       context: ./phase5_dashboard
@@ -12,9 +39,14 @@ services:
       - SCANNER_WS_URL=ws://host.docker.internal:8765
       - RADIO_WS_URL=ws://host.docker.internal:8770
       - SDR_AGENT_URL=http://host.docker.internal:8780
+      - FLEET_WS_URL=ws://mqtt-bridge:8790/ws
+      - FLEET_API_URL=http://mqtt-bridge:8791
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - mqtt-bridge
 
+  # ── Cloudflare Tunnel ──
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: groundlink-tunnel
@@ -26,3 +58,6 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - groundlink-dashboard
+
+volumes:
+  mosquitto-data:

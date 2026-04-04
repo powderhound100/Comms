@@ -23,6 +23,7 @@ const navLinks = [
   { href: '/scan-detect', label: 'Scan & Detect' },
   { href: '/radio', label: 'Radio' },
   { href: '/ads-b', label: 'ADS-B' },
+  { href: '/fleet', label: 'Fleet' },
   { href: '/references', label: 'References' },
 ]
 

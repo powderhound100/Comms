@@ -248,7 +248,8 @@ async def run_http_api(scanner: SpectrumScanner, scan_logger: ScanLogger, host: 
 @click.option("--start-freq", type=float, default=None, help="Override start frequency (MHz)")
 @click.option("--stop-freq", type=float, default=None, help="Override stop frequency (MHz)")
 @click.option("--watch-freq", type=float, default=None, help="Watch mode frequency (MHz)")
-def main(config_path, mock, mode, start_freq, stop_freq, watch_freq):
+@click.option("--device", type=int, default=None, help="RTL-SDR device index (overrides config)")
+def main(config_path, mock, mode, start_freq, stop_freq, watch_freq, device):
     """GROUNDLINK Scan & Detect — SDR signal scanner with AMR classification."""
     # Setup logging
     logging.basicConfig(
@@ -264,6 +265,10 @@ def main(config_path, mock, mode, start_freq, stop_freq, watch_freq):
     else:
         logging.warning("Config file not found: %s — using defaults", config_path)
         cfg = {}
+
+    # Apply --device override to SDR config before building
+    if device is not None:
+        cfg.setdefault("sdr", {})["device_index"] = device
 
     # Build components
     sdr, scanner, ws_server, scan_logger = build_components(cfg, mock=mock)

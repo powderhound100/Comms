@@ -1,0 +1,56 @@
+# GROUNDLINK Fleet Configuration — Multi-SDR Deployment
+#
+# This file configures multiple RTL-SDR dongles running in parallel
+# on a single host (typically a Raspberry Pi with PoE).
+#
+# Each SDR entry maps a USB device index to an operating mode.
+# The fleet manager (sdr_fleet.py) spawns one subprocess per SDR.
+
+node_id: pi-roof
+
+mqtt:
+  broker: ${MQTT_BROKER:-192.168.1.100}
+  port: ${MQTT_PORT:-1883}
+  client_id: ${MQTT_CLIENT_ID:-pi-roof}
+  reconnect_interval_s: 5
+  keepalive_s: 60
+
+# Heartbeat published to groundlink/{node_id}/status every N seconds
+heartbeat_interval_s: 10
+
+sdrs:
+  - device_index: 0
+    mode: adsb
+    label: "ADS-B Primary"
+    enabled: true
+    config:
+      gain: 496
+      # Local WS port for direct debug access (optional)
+      port: 8771
+
+  - device_index: 1
+    mode: scanner
+    label: "Wideband Scanner"
+    enabled: true
+    config:
+      scan_mode: sweep
+      start_freq: 118
+      stop_freq: 174
+      gain: 40
+
+  - device_index: 2
+    mode: radio
+    label: "Radio Tuner"
+    enabled: true
+    config:
+      freq: 94.9
+      demod: wfm
+      port: 8770
+
+  - device_index: 3
+    mode: adsb
+    label: "ADS-B Secondary"
+    enabled: true
+    config:
+      gain: 496
+      port: 8773

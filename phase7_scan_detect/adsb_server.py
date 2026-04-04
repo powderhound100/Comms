@@ -35,10 +35,18 @@ logger = logging.getLogger("adsb")
 
 # Path to the C decoder executable (same directory as this script)
 SCRIPT_DIR = Path(__file__).parent.resolve()
-ADSB_EXE = str(SCRIPT_DIR / "groundlink_adsb.exe")
 
-# RTL-SDR DLL directory — needed at runtime
-RTLSDR_DIR = r"D:\tools\rtl-sdr\x64"
+# Platform-aware binary name and library path
+IS_WINDOWS = sys.platform == "win32"
+EXE_SUFFIX = ".exe" if IS_WINDOWS else ""
+PATH_SEP = ";" if IS_WINDOWS else ":"
+ADSB_EXE = str(SCRIPT_DIR / f"groundlink_adsb{EXE_SUFFIX}")
+
+# RTL-SDR library directory (env-overridable for Pi deployment)
+RTLSDR_DIR = os.environ.get(
+    "RTLSDR_DIR",
+    r"D:\tools\rtl-sdr\x64" if IS_WINDOWS else "/usr/local/lib",
+)
 
 # Aircraft log database
 DB_PATH = SCRIPT_DIR / "db" / "aircraft.db"
@@ -172,11 +180,13 @@ class AdsbProcess:
         if self.proc is not None:
             await self.stop()
 
-        # Ensure rtlsdr.dll is findable
+        # Ensure rtlsdr library is findable
         env = os.environ.copy()
         path = env.get("PATH", "")
         if RTLSDR_DIR not in path:
-            env["PATH"] = RTLSDR_DIR + ";" + path
+            env["PATH"] = RTLSDR_DIR + PATH_SEP + path
+        if not IS_WINDOWS:
+            env["LD_LIBRARY_PATH"] = RTLSDR_DIR + ":" + env.get("LD_LIBRARY_PATH", "")
 
         cmd = [
             ADSB_EXE,
@@ -364,7 +374,10 @@ def main(port, gain, device, test):
     # Verify the C executable exists
     if not os.path.isfile(ADSB_EXE):
         logger.error("C decoder not found: %s", ADSB_EXE)
-        logger.error("Run build_adsb.bat first to compile groundlink_adsb.exe")
+        if IS_WINDOWS:
+            logger.error("Run build_adsb.bat first to compile groundlink_adsb.exe")
+        else:
+            logger.error("Run 'make groundlink_adsb' or install the decoder binary")
         sys.exit(1)
 
     adsb = AdsbProcess(gain=gain, device=device, test=test)

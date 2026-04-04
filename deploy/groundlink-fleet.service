@@ -1,0 +1,17 @@
+[Unit]
+Description=GROUNDLINK SDR Fleet Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/groundlink-fleet
+Environment=PATH=/home/pi/groundlink-fleet/venv/bin:/usr/local/bin:/usr/bin
+Environment=RTLSDR_DIR=/usr/local/lib
+ExecStart=/home/pi/groundlink-fleet/venv/bin/python sdr_fleet.py --config fleet_config.yaml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
